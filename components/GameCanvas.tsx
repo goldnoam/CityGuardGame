@@ -818,7 +818,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       if (e.trail.length > 1) {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        ctx.lineWidth = e.type === EnemyType.HEAVY ? 6 : (e.type === EnemyType.FAST ? 2 : 3);
+        
+        // Custom Widths
+        let lineWidth = 3;
+        if (e.type === EnemyType.HEAVY) lineWidth = 8;
+        if (e.type === EnemyType.FAST) lineWidth = 2;
+        if (e.type === EnemyType.WOBBLY) lineWidth = 3;
+
+        ctx.lineWidth = lineWidth;
         
         for (let k = 0; k < e.trail.length - 1; k++) {
             const p1 = e.trail[k];
@@ -834,10 +841,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
             
             if (e.type === EnemyType.HEAVY) {
                 // Smoky dark trail
-                strokeColor = `rgba(100, 40, 40, ${opacity})`;
+                strokeColor = `rgba(50, 20, 20, ${opacity * 0.8})`; 
             } else if (e.type === EnemyType.FAST) {
                 // Bright yellow with hot center
-                strokeColor = `rgba(250, 204, 21, ${opacity})`;
+                strokeColor = `rgba(255, 255, 100, ${opacity})`;
             } else if (e.type === EnemyType.WOBBLY) {
                 // Glitchy purple/cyan split
                 strokeColor = `rgba(217, 70, 239, ${opacity})`;
@@ -872,7 +879,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
                 ctx.moveTo(p1.x + 4 + jitter, p1.y);
                 ctx.lineTo(p2.x + 4 + jitter, p2.y);
                 ctx.strokeStyle = `rgba(34, 211, 238, ${opacity * 0.7})`;
+                ctx.lineWidth = 1;
                 ctx.stroke();
+                ctx.lineWidth = 3; // Reset
             }
         }
       }
@@ -911,8 +920,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
           ctx.fill();
 
       } else if (e.type === EnemyType.FAST) {
-          // FAST: Sharp Dart
-          // Shape: Long triangle pointing Right
+          // FAST: Sharp Dart with Glow
+          ctx.shadowBlur = 15;
+          ctx.shadowColor = '#fff'; // Inner Glow
+
+          // Shape: Long sharp triangle pointing Right
           ctx.beginPath();
           ctx.moveTo(15, 0); // Nose
           ctx.lineTo(-10, 5); // Back Right
@@ -920,6 +932,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
           ctx.lineTo(-10, -5); // Back Left
           ctx.closePath();
           ctx.fill();
+          ctx.shadowBlur = 0; // Reset
           
           // Engine Glow
           ctx.fillStyle = '#fff';
@@ -946,36 +959,22 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
            if (Math.random() > 0.5) ctx.fillRect(-2, 1, 4, 2);
 
       } else {
-          // STANDARD: Simple missile shape
+          // STANDARD: Red Arc / Streamlined Shape
+          // A crescent-like aerodynamic shape
           ctx.beginPath();
-          // Nose
-          ctx.moveTo(8, 0);
-          ctx.quadraticCurveTo(0, 5, -8, 5);
-          ctx.lineTo(-8, -5);
-          ctx.quadraticCurveTo(0, -5, 8, 0);
-          ctx.fill();
-          
-          // Fins
-          ctx.fillStyle = '#7f1d1d'; // Darker red
-          ctx.beginPath();
-          ctx.moveTo(-4, 3);
-          ctx.lineTo(-8, 8);
-          ctx.lineTo(-2, 3);
-          ctx.fill();
-           ctx.beginPath();
-          ctx.moveTo(-4, -3);
-          ctx.lineTo(-8, -8);
-          ctx.lineTo(-2, -3);
+          ctx.moveTo(10, 0); // Nose
+          ctx.quadraticCurveTo(0, 6, -8, 6); // Bottom arc
+          ctx.lineTo(-6, 0); // Indent
+          ctx.lineTo(-8, -6); // Top back
+          ctx.quadraticCurveTo(0, -6, 10, 0); // Top arc
           ctx.fill();
       }
 
       ctx.restore();
       
-      // Outer Glow (rendered after restore so it's not rotated/affected by local coords weirdly)
-      // Actually standard glow is fine.
-      ctx.shadowBlur = e.type === EnemyType.FAST ? 20 : 15;
+      // Outer Glow for specific types (Standard also gets a small one)
+      ctx.shadowBlur = e.type === EnemyType.FAST ? 20 : 5;
       ctx.shadowColor = e.color;
-      // We don't fill here because we filled inside the rotated context.
       ctx.shadowBlur = 0; // Reset
     });
 
