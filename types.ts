@@ -17,7 +17,10 @@ export enum EnemyType {
   STANDARD = 'STANDARD',
   FAST = 'FAST',
   HEAVY = 'HEAVY',
-  WOBBLY = 'WOBBLY'
+  WOBBLY = 'WOBBLY',
+  BULLET = 'BULLET',
+  LASER = 'LASER',
+  BOMB = 'BOMB'
 }
 
 export interface EnemyMissile {

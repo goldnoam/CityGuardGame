@@ -336,36 +336,53 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
     // Adjust entry levels based on difficulty
     let fastStart = 2;
+    let bombStart = 3; 
     let heavyStart = 4;
+    let bulletStart = 5;
     let wobblyStart = 6;
+    let laserStart = 7;
     
     if (difficulty === Difficulty.EASY) {
       fastStart = 3;
+      bombStart = 4;
       heavyStart = 6;
+      bulletStart = 7;
       wobblyStart = 8;
+      laserStart = 9;
       difficultySpeedMod = 0.8;
     } else if (difficulty === Difficulty.HARD) {
-      fastStart = 1; // Can appear in lvl 1 but rarely
+      fastStart = 1; 
+      bombStart = 2;
       heavyStart = 3;
+      bulletStart = 3;
       wobblyStart = 5;
+      laserStart = 5;
       difficultySpeedMod = 1.25;
     }
 
-    // Type Logic based on level progression & difficulty
-    if (level >= fastStart && level < heavyStart) {
-      if (rand > 0.75) type = EnemyType.FAST;
-    } else if (level >= heavyStart && level < wobblyStart) {
-      if (rand > 0.8) type = EnemyType.HEAVY;
-      else if (rand > 0.6) type = EnemyType.FAST;
-    } else if (level >= wobblyStart) {
-      if (rand > 0.85) type = EnemyType.HEAVY;
-      else if (rand > 0.70) type = EnemyType.WOBBLY;
-      else if (rand > 0.50) type = EnemyType.FAST;
+    // Weighted Random Selection based on Level
+    const availableTypes = [EnemyType.STANDARD];
+    
+    if (level >= fastStart) availableTypes.push(EnemyType.FAST);
+    if (level >= bombStart) availableTypes.push(EnemyType.BOMB);
+    if (level >= heavyStart) availableTypes.push(EnemyType.HEAVY);
+    if (level >= bulletStart) availableTypes.push(EnemyType.BULLET);
+    if (level >= wobblyStart) availableTypes.push(EnemyType.WOBBLY);
+    if (level >= laserStart) availableTypes.push(EnemyType.LASER);
+
+    // Bias towards newer types, but keep some standards
+    if (availableTypes.length > 1) {
+        // Simple logic: higher chance for advanced types if unlocked
+        if (rand > 0.4) {
+            type = availableTypes[Math.floor(Math.random() * (availableTypes.length - 1)) + 1];
+        } else {
+            type = EnemyType.STANDARD;
+        }
     }
 
-    // Hard Mode specific: Small chance for Fast even in level 1
-    if (difficulty === Difficulty.HARD && level === 1 && rand > 0.9) {
-        type = EnemyType.FAST;
+    // Hard Mode specific: Chaos
+    if (difficulty === Difficulty.HARD && level >= 3 && rand > 0.9) {
+        type = EnemyType.FAST; 
     }
 
     // Config based on type
@@ -382,6 +399,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       case EnemyType.WOBBLY:
         speedMultiplier = 0.8;
         color = '#d946ef'; // Purple
+        break;
+      case EnemyType.BOMB:
+        speedMultiplier = 0.6; // Falls slower
+        color = '#1e293b'; // Slate 800 (Blackish)
+        break;
+      case EnemyType.BULLET:
+        speedMultiplier = 2.2; // Very Fast
+        color = '#cbd5e1'; // Silver
+        break;
+      case EnemyType.LASER:
+        speedMultiplier = 2.5; // Extremely Fast
+        color = '#a3e635'; // Lime
         break;
     }
 
@@ -506,12 +535,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         const targetX = targetB ? (targetB.x + targetB.width/2) : Math.random() * canvas.width;
         const targetY = canvas.height;
         
-        const startX = Math.random() * canvas.width;
+        let startX = Math.random() * canvas.width;
         const startY = -30;
 
         const baseSpeed = 50 + (level * 10);
         const { type, speedMultiplier, color } = getEnemyConfig(level, difficulty);
         
+        // SPECIAL SPAWN LOGIC
+        if (type === EnemyType.BOMB) {
+            // Bombs fall straight down
+            startX = targetX; 
+        }
+
         const dist = Math.hypot(targetX - startX, targetY - startY);
 
         // INITIALIZE HEALTH
@@ -595,8 +630,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         // Scoring varies by type
         let baseScore = 10;
         if (enemy.type === EnemyType.FAST) baseScore = 20;
-        if (enemy.type === EnemyType.WOBBLY) baseScore = 25;
-        if (enemy.type === EnemyType.HEAVY) baseScore = 30;
+        if (enemy.type === EnemyType.BULLET) baseScore = 25;
+        if (enemy.type === EnemyType.WOBBLY) baseScore = 30;
+        if (enemy.type === EnemyType.LASER) baseScore = 35;
+        if (enemy.type === EnemyType.HEAVY) baseScore = 40;
+        if (enemy.type === EnemyType.BOMB) baseScore = 40;
         
         // Difficulty multiplier for score
         let diffMult = 1;
@@ -663,7 +701,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
           } else {
               // DAMAGED BUT ALIVE
               explosionsRef.current.push({
-                id: Date.now(),
+                id: Date.now() + Math.random(),
                 x: e.x,
                 y: e.y,
                 currentRadius: 2,
@@ -735,7 +773,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       // Update Trail
       enemy.trail.push({ x: enemy.x, y: enemy.y });
       // Wobbly trails need to be longer to see the pattern
-      const maxTrail = enemy.type === EnemyType.WOBBLY ? 40 : 25;
+      const maxTrail = (enemy.type === EnemyType.WOBBLY || enemy.type === EnemyType.LASER) ? 40 : 25;
       if (enemy.trail.length > maxTrail) enemy.trail.shift();
 
       // Base Linear Position
@@ -852,6 +890,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       if (t >= 1 || enemy.y >= canvas.height - 40) {
         // Check if hit a building
         let hitBuilding = false;
+        
+        // Bomb impact is larger
+        const impactRadius = (enemy.type === EnemyType.BOMB || enemy.type === EnemyType.HEAVY) ? 90 : 40;
+
         for (const b of buildingsRef.current) {
           if (!b.isDestroyed && enemy.x >= b.x && enemy.x <= b.x + b.width) {
             b.isDestroyed = true;
@@ -869,7 +911,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
               x: enemy.x,
               y: canvas.height - 30,
               currentRadius: 1,
-              maxRadius: enemy.type === EnemyType.HEAVY ? 80 : 40, // Heavy makes bigger impact
+              maxRadius: impactRadius, 
               alpha: 1
             });
             playSound('explode_heavy');
@@ -883,7 +925,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
               x: enemy.x,
               y: canvas.height - 20,
               currentRadius: 1,
-              maxRadius: enemy.type === EnemyType.HEAVY ? 60 : 30,
+              maxRadius: impactRadius - 20, // Slightly smaller if hitting ground
               alpha: 1
             });
             playSound(enemy.type === EnemyType.HEAVY ? 'explode_heavy' : 'explode_normal');
@@ -1078,69 +1120,99 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         
-        // Custom Widths
-        let lineWidth = 3;
-        if (e.type === EnemyType.HEAVY) lineWidth = 8;
-        if (e.type === EnemyType.FAST) lineWidth = 2;
-        if (e.type === EnemyType.WOBBLY) lineWidth = 3;
+        if (e.type === EnemyType.LASER) {
+             // Continuous Beam Effect for Laser
+             ctx.beginPath();
+             ctx.moveTo(e.trail[0].x, e.trail[0].y);
+             for (let k = 1; k < e.trail.length; k++) {
+                 ctx.lineTo(e.trail[k].x, e.trail[k].y);
+             }
+             
+             // Glow
+             ctx.shadowBlur = 15;
+             ctx.shadowColor = '#a3e635'; 
+             ctx.lineWidth = 5;
+             ctx.strokeStyle = 'rgba(163, 230, 53, 0.5)'; 
+             ctx.stroke();
+             
+             // Core
+             ctx.shadowBlur = 0;
+             ctx.lineWidth = 1.5;
+             ctx.strokeStyle = '#ffffff'; // White core
+             ctx.stroke();
+             
+        } else {
+            // Custom Widths
+            let lineWidth = 3;
+            if (e.type === EnemyType.HEAVY) lineWidth = 8;
+            if (e.type === EnemyType.FAST) lineWidth = 2;
+            if (e.type === EnemyType.WOBBLY) lineWidth = 3;
+            if (e.type === EnemyType.BULLET) lineWidth = 1;
 
-        ctx.lineWidth = lineWidth;
-        
-        for (let k = 0; k < e.trail.length - 1; k++) {
-            const p1 = e.trail[k];
-            const p2 = e.trail[k+1];
-            // Calculate opacity based on position in trail (older = transparent)
-            const opacity = k / e.trail.length;
+            ctx.lineWidth = lineWidth;
             
-            ctx.beginPath();
-            ctx.moveTo(p1.x, p1.y);
-            ctx.lineTo(p2.x, p2.y);
-            
-            let strokeColor = '';
-            
-            if (e.type === EnemyType.HEAVY) {
-                // Smoky dark trail
-                strokeColor = `rgba(50, 20, 20, ${opacity * 0.8})`; 
-            } else if (e.type === EnemyType.FAST) {
-                // Bright yellow with hot center
-                strokeColor = `rgba(255, 255, 100, ${opacity})`;
-            } else if (e.type === EnemyType.WOBBLY) {
-                // Glitchy purple/cyan split
-                strokeColor = `rgba(217, 70, 239, ${opacity})`;
-            } else {
-                // Standard red
-                strokeColor = `rgba(239, 68, 68, ${opacity})`;
-            }
-            
-            ctx.strokeStyle = strokeColor;
-            ctx.stroke();
-
-            // Additional "Hot core" for Fast missiles
-            if (e.type === EnemyType.FAST) {
+            for (let k = 0; k < e.trail.length - 1; k++) {
+                const p1 = e.trail[k];
+                const p2 = e.trail[k+1];
+                // Calculate opacity based on position in trail (older = transparent)
+                const opacity = k / e.trail.length;
+                
                 ctx.beginPath();
                 ctx.moveTo(p1.x, p1.y);
                 ctx.lineTo(p2.x, p2.y);
-                ctx.lineWidth = 1;
-                ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
-                ctx.stroke();
-                ctx.lineWidth = 2; // Reset
-            }
-
-            // Secondary "Glitch" line for Wobbly missiles
-            if (e.type === EnemyType.WOBBLY) {
-                // Main trail
-                ctx.strokeStyle = `rgba(217, 70, 239, ${opacity})`;
-                ctx.stroke();
                 
-                // Glitch trail (Offset + Jitter)
-                ctx.beginPath();
-                const jitter = (Math.random() * 4) - 2;
-                ctx.moveTo(p1.x + 4 + jitter, p1.y);
-                ctx.lineTo(p2.x + 4 + jitter, p2.y);
-                ctx.strokeStyle = `rgba(34, 211, 238, ${opacity * 0.7})`;
-                ctx.lineWidth = 1;
+                let strokeColor = '';
+                
+                if (e.type === EnemyType.HEAVY) {
+                    // Smoky dark trail
+                    strokeColor = `rgba(50, 20, 20, ${opacity * 0.8})`; 
+                } else if (e.type === EnemyType.FAST) {
+                    // Bright yellow with hot center
+                    strokeColor = `rgba(255, 255, 100, ${opacity})`;
+                } else if (e.type === EnemyType.WOBBLY) {
+                    // Glitchy purple/cyan split
+                    strokeColor = `rgba(217, 70, 239, ${opacity})`;
+                } else if (e.type === EnemyType.BULLET) {
+                    // Silver
+                    strokeColor = `rgba(203, 213, 225, ${opacity * 0.5})`;
+                } else if (e.type === EnemyType.BOMB) {
+                    // Dark bomb trail
+                    strokeColor = `rgba(30, 41, 59, ${opacity * 0.6})`;
+                } else {
+                    // Standard red
+                    strokeColor = `rgba(239, 68, 68, ${opacity})`;
+                }
+                
+                ctx.strokeStyle = strokeColor;
                 ctx.stroke();
-                ctx.lineWidth = 3; // Reset
+
+                // Additional "Hot core" for Fast missiles
+                if (e.type === EnemyType.FAST) {
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
+                    ctx.stroke();
+                    ctx.lineWidth = lineWidth; // Reset
+                }
+
+                // Secondary "Glitch" line for Wobbly missiles
+                if (e.type === EnemyType.WOBBLY) {
+                    // Main trail
+                    ctx.strokeStyle = `rgba(217, 70, 239, ${opacity})`;
+                    ctx.stroke();
+                    
+                    // Glitch trail (Offset + Jitter)
+                    ctx.beginPath();
+                    const jitter = (Math.random() * 4) - 2;
+                    ctx.moveTo(p1.x + 4 + jitter, p1.y);
+                    ctx.lineTo(p2.x + 4 + jitter, p2.y);
+                    ctx.strokeStyle = `rgba(34, 211, 238, ${opacity * 0.7})`;
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                    ctx.lineWidth = 3; // Reset
+                }
             }
         }
       }
@@ -1217,6 +1289,42 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
            if (Math.random() > 0.5) ctx.fillRect(-4, -2, 8, 2);
            if (Math.random() > 0.5) ctx.fillRect(-2, 1, 4, 2);
 
+      } else if (e.type === EnemyType.BOMB) {
+           // BOMB: Teardrop / Fat body
+           ctx.beginPath();
+           ctx.arc(0, 0, 8, 0, Math.PI * 2); // Body
+           ctx.fill();
+           
+           // Fins on back
+           ctx.fillStyle = '#475569';
+           ctx.fillRect(-10, -8, 4, 16);
+           
+           // Red blinking light
+           if (Math.floor(Date.now() / 200) % 2 === 0) {
+               ctx.fillStyle = '#ef4444';
+               ctx.beginPath();
+               ctx.arc(0, 0, 3, 0, Math.PI * 2);
+               ctx.fill();
+           }
+
+      } else if (e.type === EnemyType.BULLET) {
+           // BULLET: Simple thin rectangle
+           ctx.fillRect(-6, -2, 12, 4);
+           // Shine
+           ctx.fillStyle = '#fff';
+           ctx.fillRect(-2, -1, 4, 2);
+
+      } else if (e.type === EnemyType.LASER) {
+           // LASER: Long thin glowing beam head
+           ctx.shadowBlur = 10;
+           ctx.shadowColor = '#a3e635';
+           ctx.fillRect(-15, -1.5, 30, 3);
+           ctx.shadowBlur = 0;
+           
+           // Core
+           ctx.fillStyle = '#ecfccb';
+           ctx.fillRect(-15, -0.5, 30, 1);
+
       } else {
           // STANDARD: Red Arc / Streamlined Shape
           // A crescent-like aerodynamic shape
@@ -1232,7 +1340,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       ctx.restore();
       
       // Outer Glow for specific types (Standard also gets a small one)
-      ctx.shadowBlur = e.type === EnemyType.FAST ? 20 : 5;
+      ctx.shadowBlur = (e.type === EnemyType.FAST || e.type === EnemyType.LASER) ? 20 : 5;
       ctx.shadowColor = e.color;
       ctx.shadowBlur = 0; // Reset
 
