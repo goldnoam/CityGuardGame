@@ -384,7 +384,7 @@ export default function App() {
 
       {/* Game Over Overlay */}
       {gameState === GameState.GAME_OVER && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-red-950/90 backdrop-blur-md animate-fade-in">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-red-950/90 backdrop-blur-md animate-fade-in delay-1000 opacity-0 fill-mode-forwards" style={{animationDelay: '1.5s', animationFillMode: 'forwards'}}>
           <div className="text-center space-y-6 max-w-lg p-8 animate-scale-in">
             <h2 className="text-6xl font-black text-white drop-shadow-[0_5px_5px_rgba(0,0,0,0.5)]">
               העיר נפלה

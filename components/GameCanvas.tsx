@@ -38,6 +38,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
   const nextSpawnTimeRef = useRef<number>(0);
   const lastShotTimeRef = useRef<number>(0);
   
+  // Game Over Animation Ref
+  const gameOverStartRef = useRef<number>(0);
+  
   // Stats for the current level
   const buildingsLostInLevelRef = useRef<number>(0);
   const enemiesDestroyedRef = useRef<number>(0);
@@ -70,7 +73,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     };
   }, []);
 
-  const playSound = (type: 'warning' | 'shoot' | 'explode_normal' | 'explode_heavy' | 'turret_shoot' | 'shield_hit') => {
+  const playSound = (type: 'warning' | 'shoot' | 'explode_normal' | 'explode_heavy' | 'turret_shoot' | 'shield_hit' | 'nuke') => {
     if (!audioCtxRef.current) return;
     const ctx = audioCtxRef.current;
     if (ctx.state === 'suspended') ctx.resume();
@@ -130,6 +133,30 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       osc.start();
       osc.stop(ctx.currentTime + 0.2);
     }
+    else if (type === 'nuke') {
+       // Deep rumble
+       const bufferSize = ctx.sampleRate * 2.0;
+       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+       const data = buffer.getChannelData(0);
+       for (let i = 0; i < bufferSize; i++) {
+         data[i] = Math.random() * 2 - 1;
+       }
+       const noise = ctx.createBufferSource();
+       noise.buffer = buffer;
+       
+       const filter = ctx.createBiquadFilter();
+       filter.type = 'lowpass';
+       filter.frequency.setValueAtTime(200, ctx.currentTime);
+       filter.frequency.linearRampToValueAtTime(10, ctx.currentTime + 2);
+
+       gainNode.gain.setValueAtTime(0.5, ctx.currentTime);
+       gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 2);
+
+       noise.connect(filter);
+       filter.connect(gainNode);
+       gainNode.connect(ctx.destination);
+       noise.start();
+    }
     else if (type.startsWith('explode')) {
       // Noise burst for explosion
       const bufferSize = ctx.sampleRate * (type === 'explode_heavy' ? 1.0 : 0.5);
@@ -176,6 +203,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     lastShotTimeRef.current = 0;
     lastTurretFireTimeRef.current = 0;
     warningPlayedRef.current = false;
+    gameOverStartRef.current = 0;
     
     // Reset Shield Energy
     shieldEnergyRef.current = upgradeStats.shieldLevel * 100;
@@ -304,7 +332,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
   };
 
   const update = (time: number) => {
-    if (gameState !== GameState.PLAYING) return;
+    // We allow drawing in GAME_OVER for the explosion animation
+    if (gameState !== GameState.PLAYING && gameState !== GameState.GAME_OVER) return;
 
     const deltaTime = (time - lastTimeRef.current) / 1000;
     lastTimeRef.current = time;
@@ -317,7 +346,66 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // --- LOGIC UPDATE ---
+    // --- GAME OVER ANIMATION SEQUENCE ---
+    if (gameState === GameState.GAME_OVER) {
+       // Initialize Game Over timer
+       if (gameOverStartRef.current === 0) {
+           gameOverStartRef.current = time;
+           playSound('nuke');
+       }
+
+       const animTime = (time - gameOverStartRef.current) / 1000;
+       
+       // Clear with fade to red/black
+       // Phase 1: White Flash (0-0.2s)
+       // Phase 2: Fade to Black/Red (0.2s - 2s)
+       
+       if (animTime < 0.2) {
+           // Flash
+           ctx.fillStyle = `rgba(255, 255, 255, ${1 - animTime * 5})`;
+           ctx.fillRect(0, 0, canvas.width, canvas.height);
+       } else {
+           // Darken existing screen first, then draw nuke
+           ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(0.8, (animTime - 0.2) * 0.5)})`;
+           ctx.fillRect(0, 0, canvas.width, canvas.height);
+           
+           // Shake effect
+           const shakeAmt = Math.max(0, 20 - animTime * 10);
+           const dx = (Math.random() - 0.5) * shakeAmt;
+           const dy = (Math.random() - 0.5) * shakeAmt;
+           
+           ctx.save();
+           ctx.translate(canvas.width/2 + dx, canvas.height/2 + dy);
+           
+           // Draw Expanding Nuke Ring
+           const radius = Math.pow(animTime, 2) * 200;
+           
+           // Inner Core
+           ctx.beginPath();
+           ctx.arc(0, 0, radius, 0, Math.PI * 2);
+           const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+           grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+           grad.addColorStop(0.3, 'rgba(255, 200, 50, 0.8)');
+           grad.addColorStop(0.7, 'rgba(255, 50, 0, 0.6)');
+           grad.addColorStop(1, 'rgba(50, 0, 0, 0)');
+           ctx.fillStyle = grad;
+           ctx.fill();
+           
+           // Shockwave ring
+           ctx.beginPath();
+           ctx.arc(0, 0, radius * 1.2, 0, Math.PI * 2);
+           ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(0, 1 - animTime * 0.3)})`;
+           ctx.lineWidth = 10;
+           ctx.stroke();
+
+           ctx.restore();
+       }
+       
+       requestRef.current = requestAnimationFrame(() => update(performance.now()));
+       return;
+    }
+
+    // --- NORMAL GAMEPLAY LOGIC ---
 
     // 1. Level Timer
     levelTimeRef.current += deltaTime;
@@ -334,7 +422,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     }
 
     // 2. Audio Warning Logic
-    // Check if next spawn is imminent (within 0.5s)
     const timeUntilSpawn = nextSpawnTimeRef.current - levelTimeRef.current;
     if (timeUntilSpawn < 0.5 && timeUntilSpawn > 0 && !warningPlayedRef.current) {
         playSound('warning');
@@ -1082,7 +1169,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         }
     }
 
-    if (gameState === GameState.PLAYING) {
+    if (gameState === GameState.PLAYING || gameState === GameState.GAME_OVER) {
         requestRef.current = requestAnimationFrame((time) => {
             lastTimeRef.current = time;
             update(time);
