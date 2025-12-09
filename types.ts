@@ -34,6 +34,9 @@ export interface EnemyMissile {
   speed: number;
   color: string;
   trail: Point[];
+  health: number;
+  maxHealth: number;
+  hitByExplosionIds: number[];
 }
 
 export interface Interceptor {

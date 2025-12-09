@@ -14,6 +14,7 @@ interface GameCanvasProps {
 }
 
 const LEVEL_DURATION = 30; // seconds
+const COMBO_TIMEOUT = 2500; // ms to keep combo alive
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, upgradeStats, highScore, isMuted, onGameOver, onLevelComplete }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -38,6 +39,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
   const shieldHitTimeRef = useRef<number>(0); // Timestamp of last shield hit
   const lastTurretFireTimeRef = useRef<number>(0);
   
+  // Scoring & Combo Refs
+  const multiplierRef = useRef<number>(1);
+  const lastKillTimeRef = useRef<number>(0);
+  
   const lastTimeRef = useRef<number>(0);
   const levelTimeRef = useRef<number>(0);
   const nextSpawnTimeRef = useRef<number>(0);
@@ -56,6 +61,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
   // UI State exposed to React
   const [displayTime, setDisplayTime] = useState(LEVEL_DURATION);
   const [displayScore, setDisplayScore] = useState(0);
+  const [displayMultiplier, setDisplayMultiplier] = useState(1);
+  const [comboProgress, setComboProgress] = useState(0); // 0 to 1 for bar
 
   // Calculate stats based on upgrades
   const interceptorSpeed = 600 + (upgradeStats.speedLevel * 150);
@@ -139,8 +146,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     }
     else if (type === 'shield_hit') {
       // Dynamic Shield Sound
-      // Intensity 0 -> Critical (Low Energy), 1 -> Full Energy
-      
       const isCritical = intensity < 0.3;
       
       // Main oscillator
@@ -250,6 +255,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     lastTurretFireTimeRef.current = 0;
     warningPlayedRef.current = false;
     gameOverStartRef.current = 0;
+    
+    // Reset combo
+    multiplierRef.current = 1;
+    lastKillTimeRef.current = 0;
+    setDisplayMultiplier(1);
     
     // Reset Shield Energy
     shieldEnergyRef.current = upgradeStats.shieldLevel * 100;
@@ -384,6 +394,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
     const deltaTime = (time - lastTimeRef.current) / 1000;
     lastTimeRef.current = time;
+    const now = Date.now();
 
     // Prevent massive jumps if tab was inactive
     if (deltaTime > 0.1) return;
@@ -404,9 +415,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
        const animTime = (time - gameOverStartRef.current) / 1000;
        
        // Clear with fade to red/black
-       // Phase 1: White Flash (0-0.2s)
-       // Phase 2: Fade to Black/Red (0.2s - 2s)
-       
        if (animTime < 0.2) {
            // Flash
            ctx.fillStyle = `rgba(255, 255, 255, ${1 - animTime * 5})`;
@@ -453,6 +461,19 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     }
 
     // --- NORMAL GAMEPLAY LOGIC ---
+    
+    // Combo Timeout Check
+    if (multiplierRef.current > 1) {
+        const timeSinceKill = now - lastKillTimeRef.current;
+        if (timeSinceKill > COMBO_TIMEOUT) {
+            multiplierRef.current = 1;
+            setDisplayMultiplier(1);
+            setComboProgress(0);
+        } else {
+            // Update combo bar
+            setComboProgress(1 - (timeSinceKill / COMBO_TIMEOUT));
+        }
+    }
 
     // 1. Level Timer
     levelTimeRef.current += deltaTime;
@@ -493,6 +514,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         
         const dist = Math.hypot(targetX - startX, targetY - startY);
 
+        // INITIALIZE HEALTH
+        const maxHealth = type === EnemyType.HEAVY ? 3 : 1;
+
         enemiesRef.current.push({
           id: Date.now() + Math.random(),
           type,
@@ -506,7 +530,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
           traveledDistance: 0,
           speed: (baseSpeed + (Math.random() * 40)) * speedMultiplier,
           color: color,
-          trail: []
+          trail: [],
+          health: maxHealth,
+          maxHealth: maxHealth,
+          hitByExplosionIds: []
         });
 
         // Spawn Rate Logic
@@ -526,7 +553,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
     // 4. Auto-Turret Logic
     if (upgradeStats.turretLevel > 0) {
-      const now = Date.now();
       if (now - lastTurretFireTimeRef.current > turretCooldown) {
         // Find closest enemy
         let closestDist = Infinity;
@@ -562,6 +588,38 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       }
     }
 
+    // Helper: Handle Kill Scoring & Combo
+    const handleKill = (enemy: EnemyMissile) => {
+        enemiesDestroyedRef.current += 1;
+        
+        // Scoring varies by type
+        let baseScore = 10;
+        if (enemy.type === EnemyType.FAST) baseScore = 20;
+        if (enemy.type === EnemyType.WOBBLY) baseScore = 25;
+        if (enemy.type === EnemyType.HEAVY) baseScore = 30;
+        
+        // Difficulty multiplier for score
+        let diffMult = 1;
+        if (difficulty === Difficulty.HARD) diffMult = 1.5;
+        if (difficulty === Difficulty.EASY) diffMult = 0.8;
+
+        // Combo Logic
+        const timeSinceLast = now - lastKillTimeRef.current;
+        if (timeSinceLast < COMBO_TIMEOUT) {
+            multiplierRef.current = Math.min(multiplierRef.current + 1, 10);
+        } else {
+            // First kill of a chain is 1x
+            multiplierRef.current = 1;
+        }
+        
+        lastKillTimeRef.current = now;
+        setDisplayMultiplier(multiplierRef.current);
+        setComboProgress(1); // Reset bar
+
+        const totalScore = Math.ceil(baseScore * diffMult * multiplierRef.current);
+        setDisplayScore(s => s + totalScore);
+    };
+
     // 5. Move Turret Projectiles
     for (let i = projectilesRef.current.length - 1; i >= 0; i--) {
       const p = projectilesRef.current[i];
@@ -584,22 +642,37 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         const dist = Math.hypot(p.x - e.x, p.y - e.y);
         if (dist < 20) {
           // HIT!
-          projectilesRef.current.splice(i, 1);
-          enemiesRef.current.splice(j, 1);
+          projectilesRef.current.splice(i, 1); // Remove projectile
           
-           explosionsRef.current.push({
-            id: Date.now(),
-            x: e.x,
-            y: e.y,
-            currentRadius: 5,
-            maxRadius: 30,
-            alpha: 1
-          });
-          playSound('explode_normal');
-          
-          enemiesDestroyedRef.current += 1;
-          setDisplayScore(s => s + 10);
-          break; // Projectile destroyed, stop checking enemies
+          e.health -= 1; // Reduce Health
+
+          if (e.health <= 0) {
+              // DESTROYED
+              enemiesRef.current.splice(j, 1);
+              
+              explosionsRef.current.push({
+                id: Date.now(),
+                x: e.x,
+                y: e.y,
+                currentRadius: 5,
+                maxRadius: 30,
+                alpha: 1
+              });
+              playSound('explode_normal');
+              handleKill(e);
+          } else {
+              // DAMAGED BUT ALIVE
+              explosionsRef.current.push({
+                id: Date.now(),
+                x: e.x,
+                y: e.y,
+                currentRadius: 2,
+                maxRadius: 10,
+                alpha: 1
+              });
+              // No kill count, no sound (or quiet sound)
+          }
+          break; // Projectile done
         }
       }
     }
@@ -704,14 +777,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         
         if (distToShield < visualShieldRadius) {
            // Blocked by Shield!
-           enemiesDestroyedRef.current += 1;
+           handleKill(enemy); // Award points for shield defense
+
            shieldEnergyRef.current -= 30; // Damage to shield
            if (shieldEnergyRef.current < 0) shieldEnergyRef.current = 0;
            
            shieldHitTimeRef.current = Date.now();
            
            // Visual Feedback
-           // Pass the NEW energy % to playSound to determine intensity
            playSound('shield_hit', shieldEnergyRef.current / shieldMaxEnergy);
            
            // Small explosion
@@ -733,35 +806,40 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       let destroyed = false;
       for (const exp of explosionsRef.current) {
         const distToExp = Math.hypot(enemy.x - exp.x, enemy.y - exp.y);
+        
         if (distToExp < exp.currentRadius) {
-          destroyed = true;
-          enemiesDestroyedRef.current += 1;
-          
-          // Scoring varies by type
-          let scoreAdd = 10;
-          if (enemy.type === EnemyType.FAST) scoreAdd = 20;
-          if (enemy.type === EnemyType.WOBBLY) scoreAdd = 25;
-          if (enemy.type === EnemyType.HEAVY) scoreAdd = 30;
-          
-          // Difficulty multiplier for score
-          let diffMult = 1;
-          if (difficulty === Difficulty.HARD) diffMult = 1.5;
-          if (difficulty === Difficulty.EASY) diffMult = 0.8;
-
-          setDisplayScore(s => s + Math.ceil(scoreAdd * diffMult));
-          
-          // Explosion effect for the missile itself
-          explosionsRef.current.push({
-            id: Date.now(),
-            x: enemy.x,
-            y: enemy.y,
-            currentRadius: 5,
-            maxRadius: 30,
-            alpha: 1
-          });
-          
-          playSound(enemy.type === EnemyType.HEAVY ? 'explode_heavy' : 'explode_normal');
-          break;
+          // Check if this specific explosion ID has already hit this enemy
+          if (!enemy.hitByExplosionIds.includes(exp.id)) {
+              enemy.hitByExplosionIds.push(exp.id);
+              enemy.health -= 1;
+              
+              if (enemy.health <= 0) {
+                  destroyed = true;
+                  handleKill(enemy);
+                  
+                  // Explosion effect for the missile itself
+                  explosionsRef.current.push({
+                    id: Date.now(),
+                    x: enemy.x,
+                    y: enemy.y,
+                    currentRadius: 5,
+                    maxRadius: 30,
+                    alpha: 1
+                  });
+                  playSound(enemy.type === EnemyType.HEAVY ? 'explode_heavy' : 'explode_normal');
+                  break; 
+              } else {
+                  // Survived Hit - Spark effect
+                  explosionsRef.current.push({
+                    id: Date.now() + Math.random(),
+                    x: enemy.x,
+                    y: enemy.y,
+                    currentRadius: 2,
+                    maxRadius: 10,
+                    alpha: 1
+                  });
+              }
+          }
         }
       }
 
@@ -779,6 +857,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
             b.isDestroyed = true;
             hitBuilding = true;
             buildingsLostInLevelRef.current += 1;
+            
+            // BREAK COMBO ON DAMAGE
+            multiplierRef.current = 1;
+            setDisplayMultiplier(1);
+            setComboProgress(0);
             
             // Explosion at impact
             explosionsRef.current.push({
@@ -1152,6 +1235,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       ctx.shadowBlur = e.type === EnemyType.FAST ? 20 : 5;
       ctx.shadowColor = e.color;
       ctx.shadowBlur = 0; // Reset
+
+      // DRAW HEALTH BAR
+      if (e.maxHealth > 1) {
+         // Draw above missile (e.y - 20)
+         const barWidth = 24;
+         const barHeight = 4;
+         const barX = e.x - barWidth/2;
+         const barY = e.y - 20;
+
+         // Background
+         ctx.fillStyle = 'rgba(0,0,0,0.5)';
+         ctx.fillRect(barX, barY, barWidth, barHeight);
+
+         // Health Percent
+         const pct = Math.max(0, e.health / e.maxHealth);
+         
+         // Color mapping
+         if (pct > 0.5) ctx.fillStyle = '#22c55e'; // Green
+         else if (pct > 0.25) ctx.fillStyle = '#eab308'; // Yellow
+         else ctx.fillStyle = '#ef4444'; // Red
+
+         ctx.fillRect(barX, barY, barWidth * pct, barHeight);
+      }
     });
 
     // Draw Interceptors
@@ -1285,8 +1391,23 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       {(gameState === GameState.PLAYING || gameState === GameState.PAUSED) && (
         <div className="absolute top-4 left-4 right-4 flex justify-between z-10 pointer-events-none">
           <div className="flex flex-col items-start gap-1">
-             <div className="bg-slate-900/80 border border-slate-700 p-3 rounded-lg text-blue-400 font-bold font-mono text-xl shadow-lg shadow-blue-500/10">
-              נקודות: {displayScore}
+             <div className="bg-slate-900/80 border border-slate-700 p-3 rounded-lg flex gap-4 items-center shadow-lg shadow-blue-500/10">
+                <div className="text-blue-400 font-bold font-mono text-xl">
+                  נקודות: {displayScore}
+                </div>
+                {/* COMBO INDICATOR */}
+                {displayMultiplier > 1 && (
+                    <div className={`relative px-2 py-1 rounded font-black italic transform transition-all ${
+                        displayMultiplier >= 5 ? 'text-red-500 scale-110 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]' : 
+                        displayMultiplier >= 3 ? 'text-orange-400' : 'text-yellow-300'
+                    }`}>
+                        x{displayMultiplier}
+                        {/* Combo Bar */}
+                        <div className="absolute -bottom-1 left-0 h-1 bg-current rounded-full transition-all duration-100" 
+                             style={{width: `${comboProgress * 100}%`, opacity: 0.7}} 
+                        />
+                    </div>
+                )}
              </div>
              {highScore > 0 && (
                <div className="bg-slate-900/60 border border-slate-700 px-2 py-1 rounded text-yellow-400 font-mono text-sm">
