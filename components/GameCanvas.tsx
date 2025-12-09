@@ -862,61 +862,120 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
             // Secondary "Glitch" line for Wobbly missiles
             if (e.type === EnemyType.WOBBLY) {
-                ctx.beginPath();
-                ctx.moveTo(p1.x + 3, p1.y);
-                ctx.lineTo(p2.x + 3, p2.y);
-                ctx.lineWidth = 1;
-                ctx.strokeStyle = `rgba(34, 211, 238, ${opacity * 0.5})`; // Cyan offset
+                // Main trail
+                ctx.strokeStyle = `rgba(217, 70, 239, ${opacity})`;
                 ctx.stroke();
-                ctx.lineWidth = 3; // Reset
+                
+                // Glitch trail (Offset + Jitter)
+                ctx.beginPath();
+                const jitter = (Math.random() * 4) - 2;
+                ctx.moveTo(p1.x + 4 + jitter, p1.y);
+                ctx.lineTo(p2.x + 4 + jitter, p2.y);
+                ctx.strokeStyle = `rgba(34, 211, 238, ${opacity * 0.7})`;
+                ctx.stroke();
             }
         }
       }
 
-      // Warhead Shape
-      ctx.fillStyle = e.color;
-      ctx.beginPath();
-      
-      if (e.type === EnemyType.HEAVY) {
-          // Big circle with core
-          ctx.arc(e.x, e.y, 10, 0, Math.PI * 2);
-          ctx.fill();
-          // Dark core
-          ctx.fillStyle = '#450a0a';
-          ctx.beginPath();
-          ctx.arc(e.x, e.y, 5, 0, Math.PI * 2);
-      } else if (e.type === EnemyType.FAST) {
-          // Sharp elongated diamond / Dart
-          ctx.moveTo(e.x, e.y + 8);
-          ctx.lineTo(e.x + 4, e.y - 8);
-          ctx.lineTo(e.x, e.y - 3); 
-          ctx.lineTo(e.x - 4, e.y - 8);
-      } else if (e.type === EnemyType.WOBBLY) {
-         // Diamond
-         ctx.moveTo(e.x, e.y - 5);
-         ctx.lineTo(e.x + 5, e.y);
-         ctx.lineTo(e.x, e.y + 5);
-         ctx.lineTo(e.x - 5, e.y);
-      } else {
-         // Standard
-         ctx.arc(e.x, e.y, 4, 0, Math.PI * 2);
-      }
-      ctx.fill();
-      
-      // Inner Core Glow (Common)
-      if (e.type !== EnemyType.HEAVY) {
-          ctx.fillStyle = 'white';
-          ctx.globalAlpha = 0.6;
-          ctx.beginPath();
-          ctx.arc(e.x, e.y, 2, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = 1.0;
+      // Calculate rotation based on velocity vector
+      let angle = Math.atan2(e.targetY - e.startY, e.targetX - e.startX);
+      // For wobbly, use local tangent if enough trail exists
+      if (e.type === EnemyType.WOBBLY && e.trail.length > 1) {
+           const p1 = e.trail[e.trail.length - 1];
+           const p2 = e.trail[e.trail.length - 2];
+           angle = Math.atan2(p1.y - p2.y, p1.x - p2.x);
       }
 
-      // Outer Glow
+      ctx.save();
+      ctx.translate(e.x, e.y);
+      ctx.rotate(angle); 
+
+      // Draw Missile Shape (Pointing RIGHT > in local coords)
+      ctx.fillStyle = e.color;
+      
+      if (e.type === EnemyType.HEAVY) {
+          // HEAVY: Large Orb
+          // Body
+          ctx.beginPath();
+          ctx.arc(0, 0, 10, 0, Math.PI * 2);
+          ctx.fill();
+          // Core
+          ctx.fillStyle = '#450a0a';
+          ctx.beginPath();
+          ctx.arc(0, 0, 6, 0, Math.PI * 2);
+          ctx.fill();
+          // Highlight
+          ctx.fillStyle = 'rgba(255,255,255,0.2)';
+          ctx.beginPath();
+          ctx.arc(-3, -3, 3, 0, Math.PI * 2);
+          ctx.fill();
+
+      } else if (e.type === EnemyType.FAST) {
+          // FAST: Sharp Dart
+          // Shape: Long triangle pointing Right
+          ctx.beginPath();
+          ctx.moveTo(15, 0); // Nose
+          ctx.lineTo(-10, 5); // Back Right
+          ctx.lineTo(-5, 0);  // Engine recess
+          ctx.lineTo(-10, -5); // Back Left
+          ctx.closePath();
+          ctx.fill();
+          
+          // Engine Glow
+          ctx.fillStyle = '#fff';
+          ctx.beginPath();
+          ctx.moveTo(-5, 0);
+          ctx.lineTo(-15, 0);
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+      } else if (e.type === EnemyType.WOBBLY) {
+           // WOBBLY: Diamond
+           ctx.beginPath();
+           ctx.moveTo(8, 0);
+           ctx.lineTo(0, 6);
+           ctx.lineTo(-8, 0);
+           ctx.lineTo(0, -6);
+           ctx.closePath();
+           ctx.fill();
+           
+           // "Glitch" - random rects
+           ctx.fillStyle = '#22d3ee'; // Cyan
+           if (Math.random() > 0.5) ctx.fillRect(-4, -2, 8, 2);
+           if (Math.random() > 0.5) ctx.fillRect(-2, 1, 4, 2);
+
+      } else {
+          // STANDARD: Simple missile shape
+          ctx.beginPath();
+          // Nose
+          ctx.moveTo(8, 0);
+          ctx.quadraticCurveTo(0, 5, -8, 5);
+          ctx.lineTo(-8, -5);
+          ctx.quadraticCurveTo(0, -5, 8, 0);
+          ctx.fill();
+          
+          // Fins
+          ctx.fillStyle = '#7f1d1d'; // Darker red
+          ctx.beginPath();
+          ctx.moveTo(-4, 3);
+          ctx.lineTo(-8, 8);
+          ctx.lineTo(-2, 3);
+          ctx.fill();
+           ctx.beginPath();
+          ctx.moveTo(-4, -3);
+          ctx.lineTo(-8, -8);
+          ctx.lineTo(-2, -3);
+          ctx.fill();
+      }
+
+      ctx.restore();
+      
+      // Outer Glow (rendered after restore so it's not rotated/affected by local coords weirdly)
+      // Actually standard glow is fine.
       ctx.shadowBlur = e.type === EnemyType.FAST ? 20 : 15;
       ctx.shadowColor = e.color;
-      ctx.fill();
+      // We don't fill here because we filled inside the rotated context.
       ctx.shadowBlur = 0; // Reset
     });
 
