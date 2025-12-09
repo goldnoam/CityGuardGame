@@ -99,4 +99,5 @@ export interface UpgradeStats {
   rateLevel: number;
   turretLevel: number;
   shieldLevel: number;
+  targetingLevel: number;
 }

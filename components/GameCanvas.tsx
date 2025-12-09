@@ -1,6 +1,7 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Building, EnemyMissile, Interceptor, Explosion, GameState, UpgradeStats, EnemyType, Difficulty, Projectile } from '../types';
+import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Crosshair } from 'lucide-react';
 
 interface GameCanvasProps {
   gameState: GameState;
@@ -58,6 +59,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
   // Track previous game state to handle Resume vs Restart
   const prevGameStateRef = useRef<GameState>(gameState);
 
+  // Crosshair & Input Refs
+  const crosshairRef = useRef<{x: number, y: number}>({ x: 0, y: 0 });
+  const inputStateRef = useRef<{up: boolean, down: boolean, left: boolean, right: boolean, fire: boolean}>({
+      up: false, down: false, left: false, right: false, fire: false
+  });
+
   // UI State exposed to React
   const [displayTime, setDisplayTime] = useState(LEVEL_DURATION);
   const [displayScore, setDisplayScore] = useState(0);
@@ -94,6 +101,37 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       audioCtxRef.current?.close();
     };
   }, []);
+
+  // Keyboard Event Listeners for WASD / Arrow Keys
+  useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+          if (gameState !== GameState.PLAYING) return;
+          switch(e.code) {
+              case 'KeyW': case 'ArrowUp': inputStateRef.current.up = true; break;
+              case 'KeyS': case 'ArrowDown': inputStateRef.current.down = true; break;
+              case 'KeyA': case 'ArrowLeft': inputStateRef.current.left = true; break;
+              case 'KeyD': case 'ArrowRight': inputStateRef.current.right = true; break;
+              case 'Space': case 'Enter': inputStateRef.current.fire = true; break;
+          }
+      };
+      
+      const handleKeyUp = (e: KeyboardEvent) => {
+          switch(e.code) {
+              case 'KeyW': case 'ArrowUp': inputStateRef.current.up = false; break;
+              case 'KeyS': case 'ArrowDown': inputStateRef.current.down = false; break;
+              case 'KeyA': case 'ArrowLeft': inputStateRef.current.left = false; break;
+              case 'KeyD': case 'ArrowRight': inputStateRef.current.right = false; break;
+              case 'Space': case 'Enter': inputStateRef.current.fire = false; break;
+          }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      window.addEventListener('keyup', handleKeyUp);
+      return () => {
+          window.removeEventListener('keydown', handleKeyDown);
+          window.removeEventListener('keyup', handleKeyUp);
+      };
+  }, [gameState]);
 
   const playSound = (type: 'warning' | 'shoot' | 'explode_normal' | 'explode_heavy' | 'turret_shoot' | 'shield_hit' | 'nuke', intensity: number = 1) => {
     if (isMutedRef.current) return;
@@ -265,6 +303,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     shieldEnergyRef.current = upgradeStats.shieldLevel * 100;
     shieldHitTimeRef.current = 0;
 
+    // Center Crosshair
+    crosshairRef.current = { x: width / 2, y: height / 2 };
+
     // Create buildings if it's level 1 (New Game) or if missing
     // We only reset buildings layout on Level 1. On subsequent levels, we keep the previous state.
     if (level === 1 || buildingsRef.current.length === 0) {
@@ -288,8 +329,44 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     }
   }, [level, upgradeStats.shieldLevel]);
 
-  // Handle Mouse Click (Launch Interceptor)
+  // Handle Input (Mouse/Touch)
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (gameState !== GameState.PLAYING) return;
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Update crosshair to click position
+    crosshairRef.current = { x, y };
+
+    attemptFire(x, y);
+  };
+  
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      crosshairRef.current = { x, y };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+      // Direct drag aiming
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const touch = e.touches[0];
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      
+      crosshairRef.current = { x, y };
+  };
+
+  const attemptFire = (targetX: number, targetY: number) => {
     if (gameState !== GameState.PLAYING) return;
     
     // Resume audio context if suspended (browser policy)
@@ -306,10 +383,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
     // Spawn from bottom center
     const startX = canvas.width / 2;
     const startY = canvas.height - 20;
@@ -320,8 +393,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       y: startY,
       startX,
       startY,
-      targetX: x,
-      targetY: y,
+      targetX,
+      targetY,
       speed: interceptorSpeed,
       exploded: false,
       trail: []
@@ -435,7 +508,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
     // --- GAME OVER ANIMATION SEQUENCE ---
     if (gameState === GameState.GAME_OVER) {
-       // Initialize Game Over timer
+       // ... (Animation logic preserved) ...
        if (gameOverStartRef.current === 0) {
            gameOverStartRef.current = time;
            playSound('nuke');
@@ -443,17 +516,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
        const animTime = (time - gameOverStartRef.current) / 1000;
        
-       // Clear with fade to red/black
        if (animTime < 0.2) {
-           // Flash
            ctx.fillStyle = `rgba(255, 255, 255, ${1 - animTime * 5})`;
            ctx.fillRect(0, 0, canvas.width, canvas.height);
        } else {
-           // Darken existing screen first, then draw nuke
            ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(0.8, (animTime - 0.2) * 0.5)})`;
            ctx.fillRect(0, 0, canvas.width, canvas.height);
            
-           // Shake effect
            const shakeAmt = Math.max(0, 20 - animTime * 10);
            const dx = (Math.random() - 0.5) * shakeAmt;
            const dy = (Math.random() - 0.5) * shakeAmt;
@@ -461,10 +530,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
            ctx.save();
            ctx.translate(canvas.width/2 + dx, canvas.height/2 + dy);
            
-           // Draw Expanding Nuke Ring
            const radius = Math.pow(animTime, 2) * 200;
            
-           // Inner Core
            ctx.beginPath();
            ctx.arc(0, 0, radius, 0, Math.PI * 2);
            const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
@@ -475,7 +542,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
            ctx.fillStyle = grad;
            ctx.fill();
            
-           // Shockwave ring
            ctx.beginPath();
            ctx.arc(0, 0, radius * 1.2, 0, Math.PI * 2);
            ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(0, 1 - animTime * 0.3)})`;
@@ -491,6 +557,24 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
     // --- NORMAL GAMEPLAY LOGIC ---
     
+    // 0. Update Crosshair Position from Input
+    const moveSpeed = 600 * deltaTime; // px per second
+    const input = inputStateRef.current;
+    
+    if (input.up) crosshairRef.current.y -= moveSpeed;
+    if (input.down) crosshairRef.current.y += moveSpeed;
+    if (input.left) crosshairRef.current.x -= moveSpeed;
+    if (input.right) crosshairRef.current.x += moveSpeed;
+    
+    // Clamp Crosshair
+    crosshairRef.current.x = Math.max(0, Math.min(canvas.width, crosshairRef.current.x));
+    crosshairRef.current.y = Math.max(0, Math.min(canvas.height, crosshairRef.current.y));
+
+    // Handle Keyboard Fire
+    if (input.fire) {
+        attemptFire(crosshairRef.current.x, crosshairRef.current.y);
+    }
+    
     // Combo Timeout Check
     if (multiplierRef.current > 1) {
         const timeSinceKill = now - lastKillTimeRef.current;
@@ -499,7 +583,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
             setDisplayMultiplier(1);
             setComboProgress(0);
         } else {
-            // Update combo bar
             setComboProgress(1 - (timeSinceKill / COMBO_TIMEOUT));
         }
     }
@@ -510,12 +593,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     setDisplayTime(Math.ceil(timeLeft));
 
     if (timeLeft <= 0) {
-      // Level Complete
       onLevelComplete({
         buildingsLost: buildingsLostInLevelRef.current,
         enemiesDestroyed: enemiesDestroyedRef.current
       });
-      return; // Stop updating
+      return;
     }
 
     // 2. Audio Warning Logic
@@ -530,7 +612,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       const activeBuildings = buildingsRef.current.filter(b => !b.isDestroyed);
       
       if (activeBuildings.length > 0) {
-        // Target a random living building or ground
         const targetB = activeBuildings[Math.floor(Math.random() * activeBuildings.length)];
         const targetX = targetB ? (targetB.x + targetB.width/2) : Math.random() * canvas.width;
         const targetY = canvas.height;
@@ -541,15 +622,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         const baseSpeed = 50 + (level * 10);
         const { type, speedMultiplier, color } = getEnemyConfig(level, difficulty);
         
-        // SPECIAL SPAWN LOGIC
         if (type === EnemyType.BOMB) {
-            // Bombs fall straight down
             startX = targetX; 
         }
 
         const dist = Math.hypot(targetX - startX, targetY - startY);
-
-        // INITIALIZE HEALTH
         const maxHealth = type === EnemyType.HEAVY ? 3 : 1;
 
         enemiesRef.current.push({
@@ -571,41 +648,36 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
           hitByExplosionIds: []
         });
 
-        // Spawn Rate Logic
         let baseRate = Math.max(0.4, 2.5 - (level * 0.15));
-        
-        // Difficulty modifier for spawn rate
         let rateMod = 1;
-        if (difficulty === Difficulty.EASY) rateMod = 1.3; // Slower spawns
-        if (difficulty === Difficulty.HARD) rateMod = 0.7; // Faster spawns
+        if (difficulty === Difficulty.EASY) rateMod = 1.3;
+        if (difficulty === Difficulty.HARD) rateMod = 0.7;
 
         const spawnRate = baseRate * rateMod;
         
         nextSpawnTimeRef.current = levelTimeRef.current + (Math.random() * spawnRate);
-        warningPlayedRef.current = false; // Reset warning for next spawn
+        warningPlayedRef.current = false;
       }
     }
 
     // 4. Auto-Turret Logic
     if (upgradeStats.turretLevel > 0) {
       if (now - lastTurretFireTimeRef.current > turretCooldown) {
-        // Find closest enemy
         let closestDist = Infinity;
         let closestEnemy: EnemyMissile | null = null;
         
-        const turretX = 60; // Left side
+        const turretX = 60;
         const turretY = canvas.height - 40;
 
         enemiesRef.current.forEach(e => {
           const d = Math.hypot(e.x - turretX, e.y - turretY);
-          if (d < closestDist && e.y < canvas.height - 100) { // Don't shoot if too close to ground (visuals)
+          if (d < closestDist && e.y < canvas.height - 100) {
             closestDist = d;
             closestEnemy = e;
           }
         });
 
         if (closestEnemy) {
-          // Fire!
           const angle = Math.atan2((closestEnemy as EnemyMissile).y - turretY, (closestEnemy as EnemyMissile).x - turretX);
           const pSpeed = 800;
           projectilesRef.current.push({
@@ -627,7 +699,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     const handleKill = (enemy: EnemyMissile) => {
         enemiesDestroyedRef.current += 1;
         
-        // Scoring varies by type
         let baseScore = 10;
         if (enemy.type === EnemyType.FAST) baseScore = 20;
         if (enemy.type === EnemyType.BULLET) baseScore = 25;
@@ -636,23 +707,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         if (enemy.type === EnemyType.HEAVY) baseScore = 40;
         if (enemy.type === EnemyType.BOMB) baseScore = 40;
         
-        // Difficulty multiplier for score
         let diffMult = 1;
         if (difficulty === Difficulty.HARD) diffMult = 1.5;
         if (difficulty === Difficulty.EASY) diffMult = 0.8;
 
-        // Combo Logic
         const timeSinceLast = now - lastKillTimeRef.current;
         if (timeSinceLast < COMBO_TIMEOUT) {
             multiplierRef.current = Math.min(multiplierRef.current + 1, 10);
         } else {
-            // First kill of a chain is 1x
             multiplierRef.current = 1;
         }
         
         lastKillTimeRef.current = now;
         setDisplayMultiplier(multiplierRef.current);
-        setComboProgress(1); // Reset bar
+        setComboProgress(1);
 
         const totalScore = Math.ceil(baseScore * diffMult * multiplierRef.current);
         setDisplayScore(s => s + totalScore);
@@ -664,30 +732,22 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       p.x += p.velocityX * deltaTime;
       p.y += p.velocityY * deltaTime;
       
-      // Trail
       p.trail.push({x: p.x, y: p.y});
       if (p.trail.length > 5) p.trail.shift();
 
-      // Bounds check
       if (p.x < 0 || p.x > canvas.width || p.y < 0) {
         projectilesRef.current.splice(i, 1);
         continue;
       }
 
-      // Hit Check
       for (let j = enemiesRef.current.length - 1; j >= 0; j--) {
         const e = enemiesRef.current[j];
         const dist = Math.hypot(p.x - e.x, p.y - e.y);
         if (dist < 20) {
-          // HIT!
-          projectilesRef.current.splice(i, 1); // Remove projectile
-          
-          e.health -= 1; // Reduce Health
-
+          projectilesRef.current.splice(i, 1);
+          e.health -= 1;
           if (e.health <= 0) {
-              // DESTROYED
               enemiesRef.current.splice(j, 1);
-              
               explosionsRef.current.push({
                 id: Date.now(),
                 x: e.x,
@@ -699,7 +759,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
               playSound('explode_normal');
               handleKill(e);
           } else {
-              // DAMAGED BUT ALIVE
               explosionsRef.current.push({
                 id: Date.now() + Math.random(),
                 x: e.x,
@@ -708,9 +767,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
                 maxRadius: 10,
                 alpha: 1
               });
-              // No kill count, no sound (or quiet sound)
           }
-          break; // Projectile done
+          break;
         }
       }
     }
@@ -722,18 +780,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       const dy = missile.targetY - missile.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       
-      // Update Trail
       missile.trail.push({ x: missile.x, y: missile.y });
       if (missile.trail.length > 20) missile.trail.shift();
 
-      // Move
       if (dist < missile.speed * deltaTime) {
-        // Reached target
         missile.x = missile.targetX;
         missile.y = missile.targetY;
         missile.exploded = true;
         
-        // Create Explosion
         explosionsRef.current.push({
           id: Date.now() + Math.random(),
           x: missile.x,
@@ -754,9 +808,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     // 7. Update Explosions
     for (let i = explosionsRef.current.length - 1; i >= 0; i--) {
       const exp = explosionsRef.current[i];
-      exp.currentRadius += 100 * deltaTime; // Expand speed
+      exp.currentRadius += 100 * deltaTime;
       if (exp.currentRadius > exp.maxRadius) {
-        exp.alpha -= 2 * deltaTime; // Fade speed
+        exp.alpha -= 2 * deltaTime;
         if (exp.alpha <= 0) {
           explosionsRef.current.splice(i, 1);
         }
@@ -770,28 +824,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       enemy.traveledDistance += enemy.speed * deltaTime;
       const t = enemy.traveledDistance / enemy.totalDistance;
 
-      // Update Trail
       enemy.trail.push({ x: enemy.x, y: enemy.y });
-      // Wobbly trails need to be longer to see the pattern
-      const maxTrail = (enemy.type === EnemyType.WOBBLY || enemy.type === EnemyType.LASER) ? 40 : 25;
+      
+      // Update: Much longer trails for LASERS to create beam effect
+      const maxTrail = (enemy.type === EnemyType.LASER) ? 80 : 
+                       (enemy.type === EnemyType.WOBBLY) ? 40 : 25;
+                       
       if (enemy.trail.length > maxTrail) enemy.trail.shift();
 
-      // Base Linear Position
       let currentX = enemy.startX + (enemy.targetX - enemy.startX) * t;
       let currentY = enemy.startY + (enemy.targetY - enemy.startY) * t;
 
-      // Apply Modifiers based on Type
       if (enemy.type === EnemyType.WOBBLY) {
-        // Perpendicular offset sine wave
         const dx = enemy.targetX - enemy.startX;
         const dy = enemy.targetY - enemy.startY;
         const angle = Math.atan2(dy, dx);
         
-        // Perpendicular vector (-y, x)
         const perpX = Math.cos(angle + Math.PI/2);
         const perpY = Math.sin(angle + Math.PI/2);
         
-        // Amplitude: 60px, Frequency: based on distance
         const wave = Math.sin(enemy.traveledDistance * 0.03) * 60;
         
         currentX += perpX * wave;
@@ -805,27 +856,21 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       if (upgradeStats.shieldLevel > 0 && shieldEnergyRef.current > 0) {
         const shieldX = canvas.width / 2;
         const shieldY = canvas.height - 20;
-        // Shield visual radius varies slightly with energy
         const baseShieldRadius = 180;
         const energyPct = shieldEnergyRef.current / shieldMaxEnergy;
-        // Visually the shield shrinks a tiny bit as it gets weaker
         const visualShieldRadius = baseShieldRadius * (0.9 + (0.1 * energyPct));
         
         const distToShield = Math.hypot(enemy.x - shieldX, enemy.y - shieldY);
         
         if (distToShield < visualShieldRadius) {
-           // Blocked by Shield!
-           handleKill(enemy); // Award points for shield defense
+           handleKill(enemy);
 
-           shieldEnergyRef.current -= 30; // Damage to shield
+           shieldEnergyRef.current -= 30;
            if (shieldEnergyRef.current < 0) shieldEnergyRef.current = 0;
            
            shieldHitTimeRef.current = Date.now();
-           
-           // Visual Feedback
            playSound('shield_hit', shieldEnergyRef.current / shieldMaxEnergy);
            
-           // Small explosion
            explosionsRef.current.push({
             id: Date.now(),
             x: enemy.x,
@@ -846,7 +891,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         const distToExp = Math.hypot(enemy.x - exp.x, enemy.y - exp.y);
         
         if (distToExp < exp.currentRadius) {
-          // Check if this specific explosion ID has already hit this enemy
           if (!enemy.hitByExplosionIds.includes(exp.id)) {
               enemy.hitByExplosionIds.push(exp.id);
               enemy.health -= 1;
@@ -855,7 +899,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
                   destroyed = true;
                   handleKill(enemy);
                   
-                  // Explosion effect for the missile itself
                   explosionsRef.current.push({
                     id: Date.now(),
                     x: enemy.x,
@@ -867,7 +910,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
                   playSound(enemy.type === EnemyType.HEAVY ? 'explode_heavy' : 'explode_normal');
                   break; 
               } else {
-                  // Survived Hit - Spark effect
                   explosionsRef.current.push({
                     id: Date.now() + Math.random(),
                     x: enemy.x,
@@ -888,10 +930,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
       // Check Collision with Ground/Buildings
       if (t >= 1 || enemy.y >= canvas.height - 40) {
-        // Check if hit a building
         let hitBuilding = false;
-        
-        // Bomb impact is larger
         const impactRadius = (enemy.type === EnemyType.BOMB || enemy.type === EnemyType.HEAVY) ? 90 : 40;
 
         for (const b of buildingsRef.current) {
@@ -900,12 +939,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
             hitBuilding = true;
             buildingsLostInLevelRef.current += 1;
             
-            // BREAK COMBO ON DAMAGE
             multiplierRef.current = 1;
             setDisplayMultiplier(1);
             setComboProgress(0);
             
-            // Explosion at impact
             explosionsRef.current.push({
               id: Date.now(),
               x: enemy.x,
@@ -918,14 +955,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
           }
         }
         
-        // If it hit ground but no building, still explode
         if (!hitBuilding) {
            explosionsRef.current.push({
               id: Date.now(),
               x: enemy.x,
               y: canvas.height - 20,
               currentRadius: 1,
-              maxRadius: impactRadius - 20, // Slightly smaller if hitting ground
+              maxRadius: impactRadius - 20,
               alpha: 1
             });
             playSound(enemy.type === EnemyType.HEAVY ? 'explode_heavy' : 'explode_normal');
@@ -933,9 +969,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         
         enemiesRef.current.splice(i, 1);
 
-        // Check Game Over (All buildings destroyed)
         if (buildingsRef.current.every(b => b.isDestroyed)) {
-          onGameOver(displayScore); // Pass final score
+          onGameOver(displayScore);
           return;
         }
       }
@@ -944,7 +979,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     // --- DRAWING ---
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw Sky Gradient
+    // Draw Sky
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
     gradient.addColorStop(0, '#0f172a');
     gradient.addColorStop(1, '#1e293b');
@@ -952,25 +987,53 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Draw Ground
-    ctx.fillStyle = '#1c1917'; // Dark stone
+    ctx.fillStyle = '#1c1917';
     ctx.fillRect(0, canvas.height - 20, canvas.width, 20);
 
-    // Draw Static Defenses (Back Layer)
+    // Draw Crosshair (if active)
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(crosshairRef.current.x - 10, crosshairRef.current.y);
+    ctx.lineTo(crosshairRef.current.x + 10, crosshairRef.current.y);
+    ctx.moveTo(crosshairRef.current.x, crosshairRef.current.y - 10);
+    ctx.lineTo(crosshairRef.current.x, crosshairRef.current.y + 10);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(crosshairRef.current.x, crosshairRef.current.y, 6, 0, Math.PI * 2);
+    ctx.stroke();
     
-    // Auto-Turret
+    // --- TARGETING SYSTEM UPGRADE VISUALS ---
+    if (upgradeStats.targetingLevel > 0) {
+        // Draw dashed line from launcher to crosshair
+        ctx.beginPath();
+        ctx.setLineDash([5, 5]);
+        ctx.moveTo(canvas.width / 2, canvas.height - 20);
+        ctx.lineTo(crosshairRef.current.x, crosshairRef.current.y);
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)'; // Red-500 low opacity
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Level 2: Draw blast radius preview
+        if (upgradeStats.targetingLevel > 1) {
+            ctx.beginPath();
+            ctx.arc(crosshairRef.current.x, crosshairRef.current.y, explosionMaxRadius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
+            ctx.stroke();
+        }
+    }
+
+    // Draw Auto-Turret
     if (upgradeStats.turretLevel > 0) {
        const tx = 60;
        const ty = canvas.height - 25;
-       
-       // Base
-       ctx.fillStyle = '#4c1d95'; // Purple base
+       ctx.fillStyle = '#4c1d95';
        ctx.fillRect(tx - 15, ty, 30, 20);
-       
-       // Turret Head (Aiming?)
        ctx.save();
        ctx.translate(tx, ty);
-       // Simple bob animation or rotation
-       // For now just draw it
        ctx.fillStyle = '#a78bfa';
        ctx.beginPath();
        ctx.arc(0, 0, 12, 0, Math.PI * 2);
@@ -981,19 +1044,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     // Draw Buildings
     buildingsRef.current.forEach(b => {
       if (!b.isDestroyed) {
-        // Building Body
         ctx.fillStyle = '#3b82f6';
         ctx.fillRect(b.x, b.y, b.width, b.height);
-        
-        // Windows (simple effect)
-        ctx.fillStyle = '#fef08a'; // Light on
+        ctx.fillStyle = '#fef08a';
         for(let wx = b.x + 5; wx < b.x + b.width; wx += 15) {
              for(let wy = b.y + 5; wy < b.y + b.height; wy += 12) {
                  if (Math.random() > 0.3) ctx.fillRect(wx, wy, 8, 8);
              }
         }
       } else {
-        // Rubble
         ctx.fillStyle = '#44403c';
         ctx.beginPath();
         ctx.moveTo(b.x, canvas.height - 20);
@@ -1005,17 +1064,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       }
     });
 
-    // Draw Defense Battery (Center)
-    // Upgraded Battery Appearance
+    // Draw Defense Battery
     const batteryColor = upgradeStats.rateLevel > 1 ? '#3b82f6' : '#64748b';
     ctx.fillStyle = batteryColor;
-    
-    // Base
     ctx.beginPath();
     ctx.arc(canvas.width / 2, canvas.height - 20, 20, Math.PI, 0);
     ctx.fill();
     
-    // Tech lines for upgraded battery
     if (upgradeStats.rateLevel > 0) {
         ctx.strokeStyle = '#93c5fd';
         ctx.lineWidth = 2;
@@ -1024,7 +1079,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         ctx.stroke();
     }
     
-    // Draw Battery "Cooldown" status (small light on battery)
     const onCooldown = (Date.now() - lastShotTimeRef.current) < fireCooldown;
     ctx.fillStyle = onCooldown ? '#ef4444' : '#22c55e';
     ctx.shadowBlur = onCooldown ? 0 : 5;
@@ -1044,44 +1098,28 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
        const radius = baseRadius * (0.9 + (0.1 * energyPct));
        
        ctx.beginPath();
-       ctx.arc(shieldX, shieldY, radius, Math.PI, 0); // Half circle
+       ctx.arc(shieldX, shieldY, radius, Math.PI, 0); 
        
        const shieldGrad = ctx.createRadialGradient(shieldX, shieldY, radius * 0.8, shieldX, shieldY, radius);
        
-       // VISUAL DEGRADATION: Color shifts from Blue (High) -> Cyan (Med) -> Red (Low)
        let r, g, b;
        
        if (energyPct > 0.5) {
-           // Blue to Cyan
-           r = 59;
-           g = 130 + Math.floor(100 * (1 - energyPct)); // More green as it levels up
-           b = 246;
+           r = 59; g = 130 + Math.floor(100 * (1 - energyPct)); b = 246;
        } else {
-           // Cyan to Red (Critical)
            r = 59 + Math.floor(180 * (1 - (energyPct * 2))); 
            g = 130 - Math.floor(100 * (1 - (energyPct * 2)));
            b = 246 - Math.floor(200 * (1 - (energyPct * 2)));
        }
        
-       // Explicit Override for Low Energy RED alert
-       if (energyPct < 0.25) {
-           r = 239; g = 68; b = 68;
-       } else if (energyPct > 0.7) {
-           r = 59; g = 130; b = 246; // Solid Blue
-       }
+       if (energyPct < 0.25) { r = 239; g = 68; b = 68; } 
+       else if (energyPct > 0.7) { r = 59; g = 130; b = 246; }
 
-       // Hit Flash Effect
        const timeSinceHit = Date.now() - shieldHitTimeRef.current;
-       if (timeSinceHit < 100) {
-           r = 255; g = 255; b = 255; // Flash White
-       }
+       if (timeSinceHit < 100) { r = 255; g = 255; b = 255; }
        
-       // Pulse Effect for Low Energy
        let alphaMod = 1;
-       if (energyPct < 0.3) {
-           // Fast pulse
-           alphaMod = 0.5 + (Math.sin(Date.now() / 100) * 0.4); 
-       }
+       if (energyPct < 0.3) alphaMod = 0.5 + (Math.sin(Date.now() / 100) * 0.4); 
        
        shieldGrad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
        shieldGrad.addColorStop(0.8, `rgba(${r}, ${g}, ${b}, ${0.1 * energyPct * alphaMod})`);
@@ -1101,8 +1139,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
        ctx.beginPath();
        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
        ctx.fill();
-       
-       // Trail
        if (p.trail.length > 1) {
            ctx.beginPath();
            ctx.moveTo(p.trail[0].x, p.trail[0].y);
@@ -1115,34 +1151,34 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
     // Draw Incoming Missiles
     enemiesRef.current.forEach(e => {
-      // Draw Trail (Segmented Gradient)
+      // Draw Trail
       if (e.trail.length > 1) {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         
         if (e.type === EnemyType.LASER) {
              // Continuous Beam Effect for Laser
+             // Create a single path for the entire trail
              ctx.beginPath();
              ctx.moveTo(e.trail[0].x, e.trail[0].y);
              for (let k = 1; k < e.trail.length; k++) {
                  ctx.lineTo(e.trail[k].x, e.trail[k].y);
              }
              
-             // Glow
-             ctx.shadowBlur = 15;
-             ctx.shadowColor = '#a3e635'; 
-             ctx.lineWidth = 5;
-             ctx.strokeStyle = 'rgba(163, 230, 53, 0.5)'; 
+             // 1. Wide colored glow
+             ctx.shadowBlur = 20;
+             ctx.shadowColor = '#84cc16'; // Lime-500
+             ctx.lineWidth = 6;
+             ctx.strokeStyle = 'rgba(163, 230, 53, 0.6)'; // Lime-400
              ctx.stroke();
              
-             // Core
+             // 2. Inner bright beam
              ctx.shadowBlur = 0;
-             ctx.lineWidth = 1.5;
-             ctx.strokeStyle = '#ffffff'; // White core
+             ctx.lineWidth = 2;
+             ctx.strokeStyle = '#f7fee7'; // Lime-50
              ctx.stroke();
              
         } else {
-            // Custom Widths
             let lineWidth = 3;
             if (e.type === EnemyType.HEAVY) lineWidth = 8;
             if (e.type === EnemyType.FAST) lineWidth = 2;
@@ -1154,7 +1190,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
             for (let k = 0; k < e.trail.length - 1; k++) {
                 const p1 = e.trail[k];
                 const p2 = e.trail[k+1];
-                // Calculate opacity based on position in trail (older = transparent)
                 const opacity = k / e.trail.length;
                 
                 ctx.beginPath();
@@ -1163,30 +1198,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
                 
                 let strokeColor = '';
                 
-                if (e.type === EnemyType.HEAVY) {
-                    // Smoky dark trail
-                    strokeColor = `rgba(50, 20, 20, ${opacity * 0.8})`; 
-                } else if (e.type === EnemyType.FAST) {
-                    // Bright yellow with hot center
-                    strokeColor = `rgba(255, 255, 100, ${opacity})`;
-                } else if (e.type === EnemyType.WOBBLY) {
-                    // Glitchy purple/cyan split
-                    strokeColor = `rgba(217, 70, 239, ${opacity})`;
-                } else if (e.type === EnemyType.BULLET) {
-                    // Faint tracer
-                    strokeColor = `rgba(226, 232, 240, ${opacity * 0.3})`;
-                } else if (e.type === EnemyType.BOMB) {
-                    // Dark bomb trail
-                    strokeColor = `rgba(30, 41, 59, ${opacity * 0.6})`;
-                } else {
-                    // Standard red
-                    strokeColor = `rgba(239, 68, 68, ${opacity})`;
-                }
+                if (e.type === EnemyType.HEAVY) strokeColor = `rgba(50, 20, 20, ${opacity * 0.8})`; 
+                else if (e.type === EnemyType.FAST) strokeColor = `rgba(255, 255, 100, ${opacity})`;
+                else if (e.type === EnemyType.WOBBLY) strokeColor = `rgba(217, 70, 239, ${opacity})`;
+                else if (e.type === EnemyType.BULLET) strokeColor = `rgba(226, 232, 240, ${opacity * 0.3})`;
+                else if (e.type === EnemyType.BOMB) strokeColor = `rgba(30, 41, 59, ${opacity * 0.6})`;
+                else strokeColor = `rgba(239, 68, 68, ${opacity})`;
                 
                 ctx.strokeStyle = strokeColor;
                 ctx.stroke();
 
-                // Additional "Hot core" for Fast missiles
                 if (e.type === EnemyType.FAST) {
                     ctx.beginPath();
                     ctx.moveTo(p1.x, p1.y);
@@ -1194,16 +1215,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
                     ctx.lineWidth = 1;
                     ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
                     ctx.stroke();
-                    ctx.lineWidth = lineWidth; // Reset
+                    ctx.lineWidth = lineWidth;
                 }
 
-                // Secondary "Glitch" line for Wobbly missiles
                 if (e.type === EnemyType.WOBBLY) {
-                    // Main trail
                     ctx.strokeStyle = `rgba(217, 70, 239, ${opacity})`;
                     ctx.stroke();
-                    
-                    // Glitch trail (Offset + Jitter)
                     ctx.beginPath();
                     const jitter = (Math.random() * 4) - 2;
                     ctx.moveTo(p1.x + 4 + jitter, p1.y);
@@ -1211,15 +1228,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
                     ctx.strokeStyle = `rgba(34, 211, 238, ${opacity * 0.7})`;
                     ctx.lineWidth = 1;
                     ctx.stroke();
-                    ctx.lineWidth = 3; // Reset
+                    ctx.lineWidth = 3; 
                 }
             }
         }
       }
 
-      // Calculate rotation based on velocity vector
       let angle = Math.atan2(e.targetY - e.startY, e.targetX - e.startX);
-      // For wobbly, use local tangent if enough trail exists
       if (e.type === EnemyType.WOBBLY && e.trail.length > 1) {
            const p1 = e.trail[e.trail.length - 1];
            const p2 = e.trail[e.trail.length - 2];
@@ -1230,42 +1245,32 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       ctx.translate(e.x, e.y);
       ctx.rotate(angle); 
 
-      // Draw Missile Shape (Pointing RIGHT > in local coords)
       ctx.fillStyle = e.color;
       
       if (e.type === EnemyType.HEAVY) {
-          // HEAVY: Large Orb
-          // Body
           ctx.beginPath();
           ctx.arc(0, 0, 10, 0, Math.PI * 2);
           ctx.fill();
-          // Core
           ctx.fillStyle = '#450a0a';
           ctx.beginPath();
           ctx.arc(0, 0, 6, 0, Math.PI * 2);
           ctx.fill();
-          // Highlight
           ctx.fillStyle = 'rgba(255,255,255,0.2)';
           ctx.beginPath();
           ctx.arc(-3, -3, 3, 0, Math.PI * 2);
           ctx.fill();
 
       } else if (e.type === EnemyType.FAST) {
-          // FAST: Sharp Dart with Glow
           ctx.shadowBlur = 15;
-          ctx.shadowColor = '#fff'; // Inner Glow
-
-          // Shape: Long sharp triangle pointing Right
+          ctx.shadowColor = '#fff';
           ctx.beginPath();
-          ctx.moveTo(15, 0); // Nose
-          ctx.lineTo(-10, 5); // Back Right
-          ctx.lineTo(-5, 0);  // Engine recess
-          ctx.lineTo(-10, -5); // Back Left
+          ctx.moveTo(15, 0);
+          ctx.lineTo(-10, 5);
+          ctx.lineTo(-5, 0); 
+          ctx.lineTo(-10, -5);
           ctx.closePath();
           ctx.fill();
-          ctx.shadowBlur = 0; // Reset
-          
-          // Engine Glow
+          ctx.shadowBlur = 0;
           ctx.fillStyle = '#fff';
           ctx.beginPath();
           ctx.moveTo(-5, 0);
@@ -1275,7 +1280,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
           ctx.stroke();
 
       } else if (e.type === EnemyType.WOBBLY) {
-           // WOBBLY: Diamond
            ctx.beginPath();
            ctx.moveTo(8, 0);
            ctx.lineTo(0, 6);
@@ -1283,23 +1287,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
            ctx.lineTo(0, -6);
            ctx.closePath();
            ctx.fill();
-           
-           // "Glitch" - random rects
-           ctx.fillStyle = '#22d3ee'; // Cyan
+           ctx.fillStyle = '#22d3ee';
            if (Math.random() > 0.5) ctx.fillRect(-4, -2, 8, 2);
            if (Math.random() > 0.5) ctx.fillRect(-2, 1, 4, 2);
 
       } else if (e.type === EnemyType.BOMB) {
-           // BOMB: Teardrop / Fat body
            ctx.beginPath();
-           ctx.arc(0, 0, 8, 0, Math.PI * 2); // Body
+           ctx.arc(0, 0, 8, 0, Math.PI * 2);
            ctx.fill();
-           
-           // Fins on back
            ctx.fillStyle = '#475569';
            ctx.fillRect(-10, -8, 4, 16);
-           
-           // Red blinking light
            if (Math.floor(Date.now() / 200) % 2 === 0) {
                ctx.fillStyle = '#ef4444';
                ctx.beginPath();
@@ -1308,67 +1305,53 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
            }
 
       } else if (e.type === EnemyType.BULLET) {
-           // BULLET: High velocity slug
-           // Casing
            ctx.fillStyle = '#e2e8f0'; 
            ctx.beginPath();
-           ctx.ellipse(0, 0, 8, 2, 0, 0, Math.PI * 2); // Very thin oval
+           ctx.ellipse(0, 0, 8, 2, 0, 0, Math.PI * 2); 
            ctx.fill();
-           // Core heat
            ctx.fillStyle = '#fff';
            ctx.beginPath();
            ctx.ellipse(0, 0, 4, 1, 0, 0, Math.PI * 2);
            ctx.fill();
 
       } else if (e.type === EnemyType.LASER) {
-           // LASER: Long thin glowing beam head
            ctx.shadowBlur = 10;
            ctx.shadowColor = '#a3e635';
            ctx.fillRect(-15, -1.5, 30, 3);
            ctx.shadowBlur = 0;
-           
-           // Core
            ctx.fillStyle = '#ecfccb';
            ctx.fillRect(-15, -0.5, 30, 1);
 
       } else {
-          // STANDARD: Red Arc / Streamlined Shape
-          // A crescent-like aerodynamic shape
           ctx.beginPath();
-          ctx.moveTo(10, 0); // Nose
-          ctx.quadraticCurveTo(0, 6, -8, 6); // Bottom arc
-          ctx.lineTo(-6, 0); // Indent
-          ctx.lineTo(-8, -6); // Top back
-          ctx.quadraticCurveTo(0, -6, 10, 0); // Top arc
+          ctx.moveTo(10, 0);
+          ctx.quadraticCurveTo(0, 6, -8, 6);
+          ctx.lineTo(-6, 0);
+          ctx.lineTo(-8, -6);
+          ctx.quadraticCurveTo(0, -6, 10, 0);
           ctx.fill();
       }
 
       ctx.restore();
       
-      // Outer Glow for specific types (Standard also gets a small one)
       ctx.shadowBlur = (e.type === EnemyType.FAST || e.type === EnemyType.LASER) ? 20 : 5;
       ctx.shadowColor = e.color;
-      ctx.shadowBlur = 0; // Reset
+      ctx.shadowBlur = 0; 
 
-      // DRAW HEALTH BAR
       if (e.maxHealth > 1) {
-         // Draw above missile (e.y - 20)
          const barWidth = 24;
          const barHeight = 4;
          const barX = e.x - barWidth/2;
          const barY = e.y - 20;
 
-         // Background
          ctx.fillStyle = 'rgba(0,0,0,0.5)';
          ctx.fillRect(barX, barY, barWidth, barHeight);
 
-         // Health Percent
          const pct = Math.max(0, e.health / e.maxHealth);
          
-         // Color mapping
-         if (pct > 0.5) ctx.fillStyle = '#22c55e'; // Green
-         else if (pct > 0.25) ctx.fillStyle = '#eab308'; // Yellow
-         else ctx.fillStyle = '#ef4444'; // Red
+         if (pct > 0.5) ctx.fillStyle = '#22c55e';
+         else if (pct > 0.25) ctx.fillStyle = '#eab308';
+         else ctx.fillStyle = '#ef4444';
 
          ctx.fillRect(barX, barY, barWidth * pct, barHeight);
       }
@@ -1376,11 +1359,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
     // Draw Interceptors
     interceptorsRef.current.forEach(i => {
-      // VISUAL UPGRADE: Speed affects trail
       const isUpgradedSpeed = upgradeStats.speedLevel > 0;
       const trailWidth = 2 + (upgradeStats.speedLevel * 0.5);
       
-      // Draw Trail (Segmented)
       if (i.trail.length > 1) {
         ctx.lineWidth = trailWidth;
         ctx.lineCap = 'round';
@@ -1388,7 +1369,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         for (let k = 0; k < i.trail.length - 1; k++) {
             const p1 = i.trail[k];
             const p2 = i.trail[k+1];
-            const opacity = (k / i.trail.length) * 0.8; // Max 0.8 opacity
+            const opacity = (k / i.trail.length) * 0.8; 
             
             ctx.beginPath();
             ctx.moveTo(p1.x, p1.y);
@@ -1402,7 +1383,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
             ctx.stroke();
         }
         
-        // Extra hot core for high speed
         if (upgradeStats.speedLevel > 1) {
             ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
             ctx.lineWidth = 1;
@@ -1410,15 +1390,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         }
       }
 
-      // Missile Head
       ctx.fillStyle = '#bfdbfe';
       ctx.beginPath();
-      // VISUAL UPGRADE: Radius payload makes head slightly bigger visually
       const headSize = 2 + (upgradeStats.radiusLevel * 0.3);
       ctx.arc(i.x, i.y, headSize, 0, Math.PI * 2);
       ctx.fill();
       
-      // Engine flare
       ctx.shadowBlur = 10;
       ctx.shadowColor = '#60a5fa';
       ctx.fill();
@@ -1427,12 +1404,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
 
     // Draw Explosions
     explosionsRef.current.forEach(exp => {
-      // Main Blast
       ctx.beginPath();
       ctx.arc(exp.x, exp.y, exp.currentRadius, 0, Math.PI * 2);
-      // Hotter color for higher levels
       const red = 251;
-      const green = Math.max(100, 146 - (upgradeStats.radiusLevel * 20)); // More red/white as it levels up
+      const green = Math.max(100, 146 - (upgradeStats.radiusLevel * 20));
       ctx.fillStyle = `rgba(${red}, ${green}, 60, ${exp.alpha})`;
       ctx.fill();
       
@@ -1440,10 +1415,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // VISUAL UPGRADE: Shockwaves for radius
       if (upgradeStats.radiusLevel > 0) {
           ctx.beginPath();
-          // Inner shockwave
           ctx.arc(exp.x, exp.y, exp.currentRadius * 0.6, 0, Math.PI * 2);
           ctx.strokeStyle = `rgba(255, 255, 255, ${exp.alpha * 0.7})`;
           ctx.lineWidth = 1 + upgradeStats.radiusLevel;
@@ -1452,7 +1425,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       
       if (upgradeStats.radiusLevel > 2) {
           ctx.beginPath();
-          // Outer ripple
           ctx.arc(exp.x, exp.y, exp.currentRadius * 0.85, 0, Math.PI * 2);
           ctx.strokeStyle = `rgba(255, 200, 100, ${exp.alpha * 0.5})`;
           ctx.lineWidth = 1;
@@ -1464,15 +1436,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
   };
 
   useEffect(() => {
-    // Set canvas size
     if (canvasRef.current) {
         canvasRef.current.width = window.innerWidth;
         canvasRef.current.height = window.innerHeight;
     }
     
-    // Init level when level changes or we start playing
     if (gameState === GameState.PLAYING) {
-        // Only init if we are NOT resuming from PAUSED
         if (prevGameStateRef.current !== GameState.PAUSED) {
             initLevel();
         }
@@ -1485,38 +1454,46 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         });
     }
 
-    // Update prev state
     prevGameStateRef.current = gameState;
 
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState, level, initLevel]);
+
+  // Mobile Control Handlers
+  const handleTouchStart = (key: keyof typeof inputStateRef.current) => {
+      inputStateRef.current[key] = true;
+  };
+  const handleTouchEnd = (key: keyof typeof inputStateRef.current) => {
+      inputStateRef.current[key] = false;
+  };
 
   return (
     <>
       <canvas
         ref={canvasRef}
-        className="block absolute top-0 left-0 z-0 cursor-crosshair"
+        className="block absolute top-0 left-0 z-0 cursor-crosshair touch-none"
         onClick={handleCanvasClick}
+        onMouseMove={handleMouseMove}
+        onTouchMove={handleTouchMove}
+        onTouchStart={handleTouchMove}
       />
       
       {(gameState === GameState.PLAYING || gameState === GameState.PAUSED) && (
+        <>
         <div className="absolute top-4 left-4 right-4 flex justify-between z-10 pointer-events-none">
           <div className="flex flex-col items-start gap-1">
              <div className="bg-slate-900/80 border border-slate-700 p-3 rounded-lg flex gap-4 items-center shadow-lg shadow-blue-500/10">
                 <div className="text-blue-400 font-bold font-mono text-xl">
                   נקודות: {displayScore}
                 </div>
-                {/* COMBO INDICATOR */}
                 {displayMultiplier > 1 && (
                     <div className={`relative px-2 py-1 rounded font-black italic transform transition-all ${
                         displayMultiplier >= 5 ? 'text-red-500 scale-110 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]' : 
                         displayMultiplier >= 3 ? 'text-orange-400' : 'text-yellow-300'
                     }`}>
                         x{displayMultiplier}
-                        {/* Combo Bar */}
                         <div className="absolute -bottom-1 left-0 h-1 bg-current rounded-full transition-all duration-100" 
                              style={{width: `${comboProgress * 100}%`, opacity: 0.7}} 
                         />
@@ -1534,6 +1511,51 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
             זמן שנותר: {displayTime}
           </div>
         </div>
+
+        {/* ON-SCREEN MOBILE CONTROLS (Fallback / Alternative) */}
+        <div className="absolute bottom-8 left-8 z-20 flex flex-col items-center gap-1 opacity-80 lg:hidden pointer-events-auto">
+            <button 
+                className="w-14 h-14 bg-slate-800/80 rounded-full border border-slate-600 flex items-center justify-center active:bg-blue-600"
+                onTouchStart={() => handleTouchStart('up')} onTouchEnd={() => handleTouchEnd('up')}
+                onMouseDown={() => handleTouchStart('up')} onMouseUp={() => handleTouchEnd('up')}
+            >
+                <ChevronUp className="w-8 h-8 text-white" />
+            </button>
+            <div className="flex gap-1">
+                <button 
+                    className="w-14 h-14 bg-slate-800/80 rounded-full border border-slate-600 flex items-center justify-center active:bg-blue-600"
+                    onTouchStart={() => handleTouchStart('left')} onTouchEnd={() => handleTouchEnd('left')}
+                    onMouseDown={() => handleTouchStart('left')} onMouseUp={() => handleTouchEnd('left')}
+                >
+                    <ChevronLeft className="w-8 h-8 text-white" />
+                </button>
+                <button 
+                    className="w-14 h-14 bg-slate-800/80 rounded-full border border-slate-600 flex items-center justify-center active:bg-blue-600"
+                    onTouchStart={() => handleTouchStart('down')} onTouchEnd={() => handleTouchEnd('down')}
+                    onMouseDown={() => handleTouchStart('down')} onMouseUp={() => handleTouchEnd('down')}
+                >
+                    <ChevronDown className="w-8 h-8 text-white" />
+                </button>
+                <button 
+                    className="w-14 h-14 bg-slate-800/80 rounded-full border border-slate-600 flex items-center justify-center active:bg-blue-600"
+                    onTouchStart={() => handleTouchStart('right')} onTouchEnd={() => handleTouchEnd('right')}
+                    onMouseDown={() => handleTouchStart('right')} onMouseUp={() => handleTouchEnd('right')}
+                >
+                    <ChevronRight className="w-8 h-8 text-white" />
+                </button>
+            </div>
+        </div>
+
+        <div className="absolute bottom-8 right-20 z-20 opacity-80 lg:hidden pointer-events-auto">
+             <button 
+                className="w-20 h-20 bg-red-600/80 rounded-full border-4 border-red-800 flex items-center justify-center active:scale-95 shadow-lg shadow-red-500/30"
+                onTouchStart={() => handleTouchStart('fire')} onTouchEnd={() => handleTouchEnd('fire')}
+                onMouseDown={() => handleTouchStart('fire')} onMouseUp={() => handleTouchEnd('fire')}
+            >
+                <Crosshair className="w-10 h-10 text-white" />
+            </button>
+        </div>
+        </>
       )}
     </>
   );

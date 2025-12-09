@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import GameCanvas from './components/GameCanvas';
 import { GameState, UpgradeStats, Difficulty } from './types';
-import { Shield, Play, Zap, Crosshair, Circle, Coins, RefreshCw, Pause, Star, Anchor, Hexagon, Volume2, VolumeX, Mail } from 'lucide-react';
+import { Shield, Play, Zap, Crosshair, Circle, Coins, RefreshCw, Pause, Star, Anchor, Hexagon, Volume2, VolumeX, Mail, Target } from 'lucide-react';
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
@@ -21,7 +21,8 @@ export default function App() {
     radiusLevel: 0,
     rateLevel: 0,
     turretLevel: 0,
-    shieldLevel: 0
+    shieldLevel: 0,
+    targetingLevel: 0
   });
 
   // Load High Score
@@ -35,8 +36,8 @@ export default function App() {
     setLevel(1);
     setCredits(0);
     setBuildingsRemaining(6);
-    // Reset upgrades but keep high score
-    setUpgrades({ speedLevel: 0, radiusLevel: 0, rateLevel: 0, turretLevel: 0, shieldLevel: 0 }); 
+    // Reset upgrades but keep high score - Game starts from beginning
+    setUpgrades({ speedLevel: 0, radiusLevel: 0, rateLevel: 0, turretLevel: 0, shieldLevel: 0, targetingLevel: 0 }); 
   };
 
   const nextLevel = () => {
@@ -315,6 +316,26 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* Targeting System Upgrade */}
+                <div className="bg-slate-800 p-3 rounded-lg flex items-center justify-between hover:bg-slate-750 transition-colors border border-red-900/50">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-red-500/20 rounded-lg">
+                      <Target className="w-5 h-5 text-red-400" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm">מערכת כיוון</div>
+                      <div className="text-xs text-slate-400">{upgrades.targetingLevel === 0 ? 'לא נרכש' : `רמה ${upgrades.targetingLevel}`}</div>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => buyUpgrade('targetingLevel')}
+                    disabled={credits < getUpgradeCost(upgrades.targetingLevel)}
+                    className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:hover:bg-red-600 rounded text-xs font-bold transition-colors"
+                  >
+                    {upgrades.targetingLevel === 0 ? 'רכוש' : 'שדרג'} ({getUpgradeCost(upgrades.targetingLevel)})
+                  </button>
+                </div>
+
                 {/* Turret Upgrade */}
                 <div className="bg-slate-800 p-3 rounded-lg flex items-center justify-between hover:bg-slate-750 transition-colors border border-purple-900/50">
                   <div className="flex items-center gap-3">
@@ -382,13 +403,21 @@ export default function App() {
             <div className="text-4xl font-mono font-bold text-white py-4 border-y border-white/20">
               הגעת לשלב {level}
             </div>
-            <button 
-              onClick={() => setGameState(GameState.MENU)}
-              className="px-8 py-3 bg-white text-red-900 font-bold rounded-full hover:bg-gray-200 transition-all shadow-xl text-lg flex items-center gap-2 mx-auto hover:scale-110 transform"
-            >
-              <RefreshCw className="w-5 h-5" />
-              חזור לתפריט הראשי
-            </button>
+            <div className="flex flex-col gap-4 w-full">
+              <button 
+                onClick={startGame}
+                className="w-full px-8 py-3 bg-red-600 text-white font-bold rounded-full hover:bg-red-500 transition-all shadow-xl text-lg flex items-center justify-center gap-2 hover:scale-105 transform"
+              >
+                <RefreshCw className="w-5 h-5" />
+                נסה שוב (התחל מחדש)
+              </button>
+              <button 
+                onClick={() => setGameState(GameState.MENU)}
+                className="w-full px-8 py-3 bg-white/10 text-white font-bold rounded-full hover:bg-white/20 transition-all text-lg flex items-center justify-center gap-2"
+              >
+                חזור לתפריט הראשי
+              </button>
+            </div>
           </div>
         </div>
       )}
