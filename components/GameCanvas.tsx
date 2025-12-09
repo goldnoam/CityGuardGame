@@ -405,11 +405,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
         color = '#1e293b'; // Slate 800 (Blackish)
         break;
       case EnemyType.BULLET:
-        speedMultiplier = 2.2; // Very Fast
-        color = '#cbd5e1'; // Silver
+        speedMultiplier = 3.0; // Extremely Fast - Bullet speed
+        color = '#94a3b8'; // Slate 400 (Metallic)
         break;
       case EnemyType.LASER:
-        speedMultiplier = 2.5; // Extremely Fast
+        speedMultiplier = 2.5; // Very Fast
         color = '#a3e635'; // Lime
         break;
     }
@@ -1173,8 +1173,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
                     // Glitchy purple/cyan split
                     strokeColor = `rgba(217, 70, 239, ${opacity})`;
                 } else if (e.type === EnemyType.BULLET) {
-                    // Silver
-                    strokeColor = `rgba(203, 213, 225, ${opacity * 0.5})`;
+                    // Faint tracer
+                    strokeColor = `rgba(226, 232, 240, ${opacity * 0.3})`;
                 } else if (e.type === EnemyType.BOMB) {
                     // Dark bomb trail
                     strokeColor = `rgba(30, 41, 59, ${opacity * 0.6})`;
@@ -1308,11 +1308,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
            }
 
       } else if (e.type === EnemyType.BULLET) {
-           // BULLET: Simple thin rectangle
-           ctx.fillRect(-6, -2, 12, 4);
-           // Shine
+           // BULLET: High velocity slug
+           // Casing
+           ctx.fillStyle = '#e2e8f0'; 
+           ctx.beginPath();
+           ctx.ellipse(0, 0, 8, 2, 0, 0, Math.PI * 2); // Very thin oval
+           ctx.fill();
+           // Core heat
            ctx.fillStyle = '#fff';
-           ctx.fillRect(-2, -1, 4, 2);
+           ctx.beginPath();
+           ctx.ellipse(0, 0, 4, 1, 0, 0, Math.PI * 2);
+           ctx.fill();
 
       } else if (e.type === EnemyType.LASER) {
            // LASER: Long thin glowing beam head

@@ -1,17 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
 import GameCanvas from './components/GameCanvas';
-import { GameState, NewsReport, UpgradeStats, Difficulty } from './types';
-import { generateNewsReport } from './services/geminiService';
-import { Shield, Target, Play, AlertTriangle, Radio, Zap, Crosshair, Circle, Coins, RefreshCw, Pause, Star, Anchor, Hexagon, Volume2, VolumeX, Mail } from 'lucide-react';
+import { GameState, UpgradeStats, Difficulty } from './types';
+import { Shield, Play, Zap, Crosshair, Circle, Coins, RefreshCw, Pause, Star, Anchor, Hexagon, Volume2, VolumeX, Mail } from 'lucide-react';
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
   const [level, setLevel] = useState(1);
   const [credits, setCredits] = useState(0);
   const [buildingsRemaining, setBuildingsRemaining] = useState(6);
-  const [newsReport, setNewsReport] = useState<NewsReport | null>(null);
-  const [loadingNews, setLoadingNews] = useState(false);
   const [highScore, setHighScore] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   
@@ -59,7 +56,7 @@ export default function App() {
     setGameState(GameState.MENU);
   };
 
-  const handleLevelComplete = async (stats: { buildingsLost: number; enemiesDestroyed: number }) => {
+  const handleLevelComplete = (stats: { buildingsLost: number; enemiesDestroyed: number }) => {
     setGameState(GameState.LEVEL_COMPLETE);
     const currentRemaining = Math.max(0, buildingsRemaining - stats.buildingsLost);
     setBuildingsRemaining(currentRemaining);
@@ -71,12 +68,6 @@ export default function App() {
 
     const earned = Math.floor(((currentRemaining * 50) + (stats.enemiesDestroyed * 10) + 100) * difficultyBonus); 
     setCredits(c => c + earned);
-
-    // Generate Gemini Report
-    setLoadingNews(true);
-    const report = await generateNewsReport(level, stats.buildingsLost, currentRemaining);
-    setNewsReport(report);
-    setLoadingNews(false);
   };
 
   const handleGameOver = (finalScore: number) => {
@@ -233,49 +224,24 @@ export default function App() {
         </div>
       )}
 
-      {/* Level Complete / News Report / Upgrade Shop Overlay */}
+      {/* Level Complete / Upgrade Shop Overlay */}
       {gameState === GameState.LEVEL_COMPLETE && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/95 backdrop-blur-md overflow-y-auto animate-fade-in">
-          <div className="max-w-4xl w-full p-4 md:p-8 relative grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="max-w-2xl w-full p-4 md:p-8 relative space-y-6">
             
-            {/* Left Column: Status Report */}
-            <div className="space-y-6 animate-slide-up">
-              <div className="bg-red-700 text-white px-4 py-2 font-black text-xl uppercase tracking-widest inline-flex items-center gap-2 shadow-lg">
-                <Radio className="w-5 h-5 animate-pulse" />
-                מבזק חדשות מיוחד
+            {/* Stats Summary */}
+            <div className="grid grid-cols-2 gap-4 animate-slide-up">
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col items-center">
+                <div className="text-slate-500 text-sm mb-1">שלב הושלם</div>
+                <div className="text-3xl font-mono text-green-400 font-bold">{level}</div>
               </div>
-
-              {loadingNews ? (
-                <div className="text-center py-12 space-y-4">
-                  <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                  <p className="text-blue-300 animate-pulse">מעבד נתונים מהשטח...</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="border-r-4 border-red-600 pr-6">
-                    <h2 className="text-3xl font-bold text-white mb-2 leading-tight">
-                      {newsReport?.headline}
-                    </h2>
-                    <p className="text-lg text-slate-300 leading-relaxed">
-                      {newsReport?.description}
-                    </p>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
-                      <div className="text-slate-500 text-xs">שלב הושלם</div>
-                      <div className="text-xl font-mono text-green-400">{level}</div>
-                    </div>
-                    <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
-                      <div className="text-slate-500 text-xs">בניינים שנותרו</div>
-                      <div className="text-xl font-mono text-blue-400">{buildingsRemaining}</div>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col items-center">
+                <div className="text-slate-500 text-sm mb-1">בניינים שנותרו</div>
+                <div className="text-3xl font-mono text-blue-400 font-bold">{buildingsRemaining}</div>
+              </div>
             </div>
 
-            {/* Right Column: Armory / Upgrades */}
+            {/* Armory / Upgrades */}
             <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-6 animate-slide-up delay-100">
               <div className="flex items-center justify-between border-b border-slate-700 pb-4">
                 <h3 className="text-2xl font-bold text-white flex items-center gap-2">
