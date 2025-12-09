@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import GameCanvas from './components/GameCanvas';
 import { GameState, NewsReport, UpgradeStats, Difficulty } from './types';
 import { generateNewsReport } from './services/geminiService';
-import { Shield, Target, Play, AlertTriangle, Radio, Zap, Crosshair, Circle, Coins, RefreshCw, Pause, Star, Anchor, Hexagon } from 'lucide-react';
+import { Shield, Target, Play, AlertTriangle, Radio, Zap, Crosshair, Circle, Coins, RefreshCw, Pause, Star, Anchor, Hexagon, Volume2, VolumeX, Mail } from 'lucide-react';
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
@@ -13,6 +13,7 @@ export default function App() {
   const [newsReport, setNewsReport] = useState<NewsReport | null>(null);
   const [loadingNews, setLoadingNews] = useState(false);
   const [highScore, setHighScore] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
   
   // Difficulty State
   const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.MEDIUM);
@@ -112,9 +113,29 @@ export default function App() {
         difficulty={difficulty}
         upgradeStats={upgrades}
         highScore={highScore}
+        isMuted={isMuted}
         onGameOver={handleGameOver}
         onLevelComplete={handleLevelComplete}
       />
+
+      {/* Mute Button (Bottom Right) */}
+      <button 
+        onClick={() => setIsMuted(!isMuted)}
+        className="absolute bottom-4 right-4 z-20 bg-slate-800/80 p-2 rounded-full border border-slate-600 hover:bg-slate-700 transition-colors shadow-lg active:scale-95 text-slate-300"
+        aria-label={isMuted ? "Unmute" : "Mute"}
+      >
+        {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
+      </button>
+
+      {/* Footer (Copyright & Feedback) */}
+      <div className="absolute bottom-1 w-full text-center z-10 pointer-events-none">
+          <div className="text-[10px] text-slate-600 font-mono pointer-events-auto inline-flex gap-4 items-center bg-slate-950/50 px-3 py-1 rounded-full backdrop-blur-sm">
+              <span>(C) Noam Gold AI 2025</span>
+              <a href="mailto:gold.noam@gmail.com" className="hover:text-blue-400 flex items-center gap-1 transition-colors">
+                  Send Feedback <Mail className="w-3 h-3" />
+              </a>
+          </div>
+      </div>
 
       {/* Pause Button */}
       {(gameState === GameState.PLAYING || gameState === GameState.PAUSED) && (

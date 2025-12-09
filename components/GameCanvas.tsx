@@ -8,19 +8,23 @@ interface GameCanvasProps {
   difficulty: Difficulty;
   upgradeStats: UpgradeStats;
   highScore: number;
+  isMuted: boolean;
   onGameOver: (score: number) => void;
   onLevelComplete: (stats: { buildingsLost: number; enemiesDestroyed: number }) => void;
 }
 
 const LEVEL_DURATION = 30; // seconds
 
-const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, upgradeStats, highScore, onGameOver, onLevelComplete }) => {
+const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, upgradeStats, highScore, isMuted, onGameOver, onLevelComplete }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>();
   
   // Audio Context
   const audioCtxRef = useRef<AudioContext | null>(null);
   const warningPlayedRef = useRef<boolean>(false);
+  
+  // Mute Ref to avoid stale closures in RAF loop
+  const isMutedRef = useRef(isMuted);
 
   // Game State Refs (Mutable for performance in game loop)
   const buildingsRef = useRef<Building[]>([]);
@@ -31,6 +35,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
   // New Defense Refs
   const projectilesRef = useRef<Projectile[]>([]); // Turret shots
   const shieldEnergyRef = useRef<number>(0);
+  const shieldHitTimeRef = useRef<number>(0); // Timestamp of last shield hit
   const lastTurretFireTimeRef = useRef<number>(0);
   
   const lastTimeRef = useRef<number>(0);
@@ -62,6 +67,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
   const shieldMaxEnergy = upgradeStats.shieldLevel * 100;
   const turretCooldown = Math.max(200, 1000 - (upgradeStats.turretLevel * 100)); // 1s base -> 0.2s
 
+  // Sync mute prop to ref
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+    if (isMuted && audioCtxRef.current?.state === 'running') {
+      audioCtxRef.current.suspend();
+    } else if (!isMuted && audioCtxRef.current?.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+  }, [isMuted]);
+
   // Initialize Audio
   useEffect(() => {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -73,8 +88,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     };
   }, []);
 
-  const playSound = (type: 'warning' | 'shoot' | 'explode_normal' | 'explode_heavy' | 'turret_shoot' | 'shield_hit' | 'nuke') => {
+  const playSound = (type: 'warning' | 'shoot' | 'explode_normal' | 'explode_heavy' | 'turret_shoot' | 'shield_hit' | 'nuke', intensity: number = 1) => {
+    if (isMutedRef.current) return;
     if (!audioCtxRef.current) return;
+
     const ctx = audioCtxRef.current;
     if (ctx.state === 'suspended') ctx.resume();
 
@@ -121,17 +138,46 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       osc.stop(ctx.currentTime + 0.1);
     }
     else if (type === 'shield_hit') {
-      // Electric buzz
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(100, ctx.currentTime);
-      osc.frequency.linearRampToValueAtTime(50, ctx.currentTime + 0.2);
-      gainNode.gain.setValueAtTime(0.05, ctx.currentTime);
-      gainNode.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+      // Dynamic Shield Sound
+      // Intensity 0 -> Critical (Low Energy), 1 -> Full Energy
+      
+      const isCritical = intensity < 0.3;
+      
+      // Main oscillator
+      osc.type = isCritical ? 'sawtooth' : 'sine';
+      
+      // Pitch drops if energy is low
+      const startFreq = isCritical ? 150 : 300;
+      const endFreq = isCritical ? 50 : 100;
+      
+      osc.frequency.setValueAtTime(startFreq, ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(endFreq, ctx.currentTime + 0.3);
+      
+      gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.3);
       
       osc.connect(gainNode);
+
+      // If critical, add a distorted buzzing layer
+      if (isCritical) {
+          const osc2 = ctx.createOscillator();
+          const gain2 = ctx.createGain();
+          osc2.type = 'square';
+          osc2.frequency.setValueAtTime(80, ctx.currentTime);
+          osc2.frequency.linearRampToValueAtTime(40, ctx.currentTime + 0.4);
+          
+          gain2.gain.setValueAtTime(0.05, ctx.currentTime);
+          gain2.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+          
+          osc2.connect(gain2);
+          gain2.connect(ctx.destination);
+          osc2.start();
+          osc2.stop(ctx.currentTime + 0.4);
+      }
+      
       gainNode.connect(ctx.destination);
       osc.start();
-      osc.stop(ctx.currentTime + 0.2);
+      osc.stop(ctx.currentTime + 0.3);
     }
     else if (type === 'nuke') {
        // Deep rumble
@@ -207,6 +253,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     
     // Reset Shield Energy
     shieldEnergyRef.current = upgradeStats.shieldLevel * 100;
+    shieldHitTimeRef.current = 0;
 
     // Create buildings if it's level 1 (New Game) or if missing
     // We only reset buildings layout on Level 1. On subsequent levels, we keep the previous state.
@@ -236,7 +283,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     if (gameState !== GameState.PLAYING) return;
     
     // Resume audio context if suspended (browser policy)
-    if (audioCtxRef.current?.state === 'suspended') {
+    if (audioCtxRef.current?.state === 'suspended' && !isMutedRef.current) {
       audioCtxRef.current.resume();
     }
     
@@ -647,17 +694,26 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
       if (upgradeStats.shieldLevel > 0 && shieldEnergyRef.current > 0) {
         const shieldX = canvas.width / 2;
         const shieldY = canvas.height - 20;
-        const shieldRadius = 180; // Fixed visual radius
+        // Shield visual radius varies slightly with energy
+        const baseShieldRadius = 180;
+        const energyPct = shieldEnergyRef.current / shieldMaxEnergy;
+        // Visually the shield shrinks a tiny bit as it gets weaker
+        const visualShieldRadius = baseShieldRadius * (0.9 + (0.1 * energyPct));
+        
         const distToShield = Math.hypot(enemy.x - shieldX, enemy.y - shieldY);
         
-        if (distToShield < shieldRadius) {
+        if (distToShield < visualShieldRadius) {
            // Blocked by Shield!
            enemiesDestroyedRef.current += 1;
            shieldEnergyRef.current -= 30; // Damage to shield
            if (shieldEnergyRef.current < 0) shieldEnergyRef.current = 0;
            
+           shieldHitTimeRef.current = Date.now();
+           
            // Visual Feedback
-           playSound('shield_hit');
+           // Pass the NEW energy % to playSound to determine intensity
+           playSound('shield_hit', shieldEnergyRef.current / shieldMaxEnergy);
+           
            // Small explosion
            explosionsRef.current.push({
             id: Date.now(),
@@ -857,27 +913,60 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, level, difficulty, u
     if (upgradeStats.shieldLevel > 0 && shieldEnergyRef.current > 0) {
        const shieldX = canvas.width / 2;
        const shieldY = canvas.height - 20;
-       const radius = 180;
        
-       // Opacity depends on energy
        const energyPct = shieldEnergyRef.current / shieldMaxEnergy;
+       const baseRadius = 180;
+       const radius = baseRadius * (0.9 + (0.1 * energyPct));
        
        ctx.beginPath();
        ctx.arc(shieldX, shieldY, radius, Math.PI, 0); // Half circle
        
        const shieldGrad = ctx.createRadialGradient(shieldX, shieldY, radius * 0.8, shieldX, shieldY, radius);
-       const r = Math.floor(255 * (1 - energyPct));
-       const g = Math.floor(255 * energyPct);
        
-       shieldGrad.addColorStop(0, `rgba(${r}, ${g}, 255, 0)`);
-       shieldGrad.addColorStop(0.8, `rgba(${r}, ${g}, 255, ${0.1 * energyPct})`);
-       shieldGrad.addColorStop(1, `rgba(${r}, ${g}, 255, ${0.4 * energyPct})`);
+       // VISUAL DEGRADATION: Color shifts from Blue (High) -> Cyan (Med) -> Red (Low)
+       let r, g, b;
+       
+       if (energyPct > 0.5) {
+           // Blue to Cyan
+           r = 59;
+           g = 130 + Math.floor(100 * (1 - energyPct)); // More green as it levels up
+           b = 246;
+       } else {
+           // Cyan to Red (Critical)
+           r = 59 + Math.floor(180 * (1 - (energyPct * 2))); 
+           g = 130 - Math.floor(100 * (1 - (energyPct * 2)));
+           b = 246 - Math.floor(200 * (1 - (energyPct * 2)));
+       }
+       
+       // Explicit Override for Low Energy RED alert
+       if (energyPct < 0.25) {
+           r = 239; g = 68; b = 68;
+       } else if (energyPct > 0.7) {
+           r = 59; g = 130; b = 246; // Solid Blue
+       }
+
+       // Hit Flash Effect
+       const timeSinceHit = Date.now() - shieldHitTimeRef.current;
+       if (timeSinceHit < 100) {
+           r = 255; g = 255; b = 255; // Flash White
+       }
+       
+       // Pulse Effect for Low Energy
+       let alphaMod = 1;
+       if (energyPct < 0.3) {
+           // Fast pulse
+           alphaMod = 0.5 + (Math.sin(Date.now() / 100) * 0.4); 
+       }
+       
+       shieldGrad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+       shieldGrad.addColorStop(0.8, `rgba(${r}, ${g}, ${b}, ${0.1 * energyPct * alphaMod})`);
+       shieldGrad.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${0.4 * energyPct * alphaMod})`);
        
        ctx.fillStyle = shieldGrad;
        ctx.fill();
        
-       ctx.lineWidth = 2;
-       ctx.strokeStyle = `rgba(${r}, ${g}, 255, ${0.6 * energyPct})`;
+       ctx.lineWidth = energyPct < 0.3 ? (3 + Math.sin(Date.now() / 50)) : 2;
+       ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${0.6 * energyPct * alphaMod})`;
        ctx.stroke();
     }
 
