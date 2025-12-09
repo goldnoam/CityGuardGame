@@ -1,0 +1,5 @@
+{
+  "name": "Shomrei HaIr (City Guardians)",
+  "description": "A 2D air defense simulation game where you intercept incoming missiles to protect the city.",
+  "requestFramePermissions": []
+}
